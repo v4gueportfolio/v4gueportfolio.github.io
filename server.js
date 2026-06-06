@@ -81,7 +81,6 @@ const commands = [
         .addChannelOption(option => option.setName('target').setDescription('Select the target chat channel').setRequired(true).addChannelTypes(ChannelType.GuildText))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-    // Fixed the duplicate call nesting here!
     new SlashCommandBuilder()
         .setName('eventrole')
         .setDescription('Set the required role to use the event host command.')
@@ -98,6 +97,37 @@ client.once('ready', async () => {
     } catch (error) {
         console.error(error);
     }
+
+    // === AUTOMATED SERVER STATS COUNTER ===
+    // Replace these placeholder strings with your actual Voice Channel IDs, Shafir!
+    const TOTAL_MEMBERS_CH_ID = 'YOUR_TOTAL_MEMBERS_CHANNEL_ID';
+    const BOTS_CH_ID = 'YOUR_BOTS_CHANNEL_ID';
+    
+    async function updateServerStats() {
+        try {
+            // Loop over all guilds your bot is inside
+            for (const [guildId, guild] of client.guilds.cache) {
+                // Fetch full member chunk so the counts aren't stale
+                await guild.members.fetch().catch(() => null);
+
+                const totalMembers = guild.memberCount;
+                const totalBots = guild.members.cache.filter(m => m.user.bot).size;
+
+                const totalCh = guild.channels.cache.get(TOTAL_MEMBERS_CH_ID);
+                const botsCh = guild.channels.cache.get(BOTS_CH_ID);
+
+                if (totalCh) await totalCh.setName(`Members: ${totalMembers}`).catch(() => null);
+                if (botsCh) await botsCh.setName(`Bots: ${totalBots}`).catch(() => null);
+            }
+            console.log('Server stats updated smoothly, no cap!');
+        } catch (err) {
+            console.error('Stats loop hit a wall:', err);
+        }
+    }
+
+    // Run immediately on boot, then update every 10 minutes (Discord API limit safety)
+    updateServerStats();
+    setInterval(updateServerStats, 600000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -144,7 +174,6 @@ client.on('interactionCreate', async interaction => {
         let postedCount = 0;
         let missingRoleServers = 0;
 
-        // Loop over every server the bot lives in
         for (const [id, guild] of client.guilds.cache) {
             const guildSettings = settings[id];
             const targetChannelId = guildSettings?.channelId;
@@ -156,7 +185,6 @@ client.on('interactionCreate', async interaction => {
                 const member = await guild.members.fetch(interaction.user.id).catch(() => null);
                 if (!member) continue; 
 
-                // Strictly check if they have the required role setup on this server
                 if (requiredRoleId && !member.roles.cache.has(requiredRoleId)) {
                     missingRoleServers++;
                     continue; 
