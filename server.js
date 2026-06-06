@@ -100,8 +100,8 @@ client.once('ready', async () => {
 
     // === AUTOMATED SERVER STATS COUNTER ===
     // Replace these placeholder strings with your actual Voice Channel IDs, Shafir!
-    const TOTAL_MEMBERS_CH_ID = 'YOUR_TOTAL_MEMBERS_CHANNEL_ID';
-    const BOTS_CH_ID = 'YOUR_BOTS_CHANNEL_ID';
+    const TOTAL_MEMBERS_CH_ID = '1512730703715106836';
+    const BOTS_CH_ID = '1512731743696977960';
     
     async function updateServerStats() {
         try {
