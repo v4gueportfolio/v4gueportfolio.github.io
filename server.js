@@ -19,7 +19,7 @@ app.get('/callback', async (req, res) => {
         }), {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
-        res.send('Bot authorized successfully! You can close this tab now.');
+        res.send('Bot authorized successfully! You can close this tab now, Shafir.');
     } catch (error) {
         console.error(error.response?.data || error.message);
         res.status(500).send('OAuth2 Exchange Failed');
@@ -29,7 +29,7 @@ app.get('/callback', async (req, res) => {
 app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === BOT CODE WITH NICKNAME FETCH & SPOILER ROLE PING ===
+// === BOT CODE WITH MANDATORY ROBLOX LINK VALIDATION ===
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] }); 
 
 const commands = [
@@ -37,7 +37,7 @@ const commands = [
         .setName('createevent')
         .setDescription('Create a new server event!')
         .addStringOption(option => option.setName('title').setDescription('Event title').setRequired(true))
-        .addStringOption(option => option.setName('link').setDescription('Event link (Roblox link)').setRequired(true))
+        .addStringOption(option => option.setName('link').setDescription('Event link (MUST be a valid Roblox link)').setRequired(true))
         .addNumberOption(option => option.setName('duration').setDescription('Time value (e.g. 30, 2, 5)').setRequired(true))
         .addStringOption(option => 
             option.setName('unit')
@@ -87,19 +87,19 @@ client.on('interactionCreate', async interaction => {
         const unit = interaction.options.getString('unit');
         const desc = interaction.options.getString('desc') || 'No description provided.';
         
-        // Formats input to guarantee it starts with www.roblox.com
+        // STRICT ROBLOX CHECK - Throws warning error instantly if condition fails
+        if (!link.toLowerCase().includes('roblox.com')) {
+            return await interaction.reply({
+                content: `⚠️ **Hold up vro!** That is not a valid Roblox link. Please submit a real \`roblox.com\` web URL! 🥀`,
+                ephemeral: true
+            });
+        }
+
+        // Clean formatting validation check loop
         if (!link.startsWith('http://') && !link.startsWith('https://')) {
             link = 'https://' + link;
         }
-        try {
-            const urlObj = new URL(link);
-            urlObj.hostname = 'www.roblox.com';
-            link = urlObj.href;
-        } catch (e) {
-            link = 'https://www.roblox.com/' + link.replace(/^(https?:\/\/)?(www\.)?/, '');
-        }
 
-        // FORCE A FRESH FETCH FROM THE SERVERS TARGET GUILD REGISTRY FOR TRUE NICKNAMES
         let hostServerName = interaction.user.displayName;
         try {
             const targetMember = await interaction.guild.members.fetch(interaction.user.id);
@@ -123,7 +123,7 @@ client.on('interactionCreate', async interaction => {
         const relativeTimeTag = `<t:${futureUnixTimestamp}:R>`; 
 
         const eventEmbed = new EmbedBuilder()
-            .setColor(0xFFFF00) 
+            .setColor(0x00FF00) 
             .setTitle(`**${title} by ${hostServerName} (${hostMention})**`) 
             .setDescription(desc)
             .addFields(
@@ -132,7 +132,6 @@ client.on('interactionCreate', async interaction => {
             )
             .setTimestamp();
 
-        // Target role tag with a clean spoiler block line underneath the main card
         const rolePingText = `|| <@&1512735552426741910> ||`;
 
         const finalTargetId = fallbackChannelId || interaction.channelId;
