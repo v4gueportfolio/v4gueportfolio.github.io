@@ -102,29 +102,47 @@ client.once('ready', async () => {
     const TOTAL_MEMBERS_CH_ID = '1512730703715106836';
     const BOTS_CH_ID = '1512731743696977960';
     
+    let lastUpdated = 0;
+    const COOLDOWN_MS = 6 * 60 * 1000; // Strict 6-minute cooldown lock
+
     async function updateServerStats() {
+        const now = Date.now();
+        if (now - lastUpdated < COOLDOWN_MS) {
+            console.log('Stats update blocked: Cooldown active, cooling down... ⏳');
+            return;
+        }
+
         try {
             for (const [guildId, guild] of client.guilds.cache) {
-                await guild.members.fetch().catch(() => null);
+                const totalCh = await guild.channels.fetch(TOTAL_MEMBERS_CH_ID).catch(() => null);
+                const botsCh = await guild.channels.fetch(BOTS_CH_ID).catch(() => null);
 
-                // Filter out the bot users entirely
+                if (!totalCh && !botsCh) continue;
+
+                await guild.members.fetch().catch(() => null);
                 const totalBots = guild.members.cache.filter(m => m.user.bot).size;
                 const realHumans = guild.memberCount - totalBots;
 
-                const totalCh = guild.channels.cache.get(TOTAL_MEMBERS_CH_ID);
-                const botsCh = guild.channels.cache.get(BOTS_CH_ID);
-
-                if (totalCh) await totalCh.setName(`Members: ${realHumans}`).catch(() => null);
-                if (botsCh) await botsCh.setName(`Bots: ${totalBots}`).catch(() => null);
+                if (totalCh && totalCh.name !== `Members: ${realHumans}`) {
+                    await totalCh.setName(`Members: ${realHumans}`).catch(() => null);
+                }
+                if (botsCh && botsCh.name !== `Bots: ${totalBots}`) {
+                    await botsCh.setName(`Bots: ${totalBots}`).catch(() => null);
+                }
             }
-            console.log('Server stats updated smoothly, no cap!');
+            lastUpdated = Date.now();
+            console.log('Server stats checked and safely updated inside the 6m window!');
         } catch (err) {
             console.error('Stats loop hit a wall:', err);
         }
     }
 
+    // Force an initial update on startup execution
     updateServerStats();
-    setInterval(updateServerStats, 600000);
+
+    // Recheck stats on joins/leaves, but strictly gatekeeped by the 6-minute clock
+    client.on('guildMemberAdd', () => updateServerStats());
+    client.on('guildMemberRemove', () => updateServerStats());
 });
 
 client.on('interactionCreate', async interaction => {
