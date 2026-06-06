@@ -31,7 +31,7 @@ app.get('/callback', async (req, res) => {
 app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === NEW ENGINE WITH DATABASE STORAGE, DM HOSTING, & ROLE CHECKS ===
+// === BOT ENGINE WITH FIXED COMMAND BUILDER ===
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
@@ -43,13 +43,15 @@ const client = new Client({
 
 const DATA_FILE = path.join(__dirname, 'server_settings.json');
 
-// Helper to load settings
 function loadSettings() {
     if (!fs.existsSync(DATA_FILE)) return {};
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    try {
+        return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    } catch (e) {
+        return {};
+    }
 }
 
-// Helper to save settings
 function saveSettings(settings) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(settings, null, 2));
 }
@@ -79,10 +81,11 @@ const commands = [
         .addChannelOption(option => option.setName('target').setDescription('Select the target chat channel').setRequired(true).addChannelTypes(ChannelType.GuildText))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
+    // Fixed the duplicate call nesting here!
     new SlashCommandBuilder()
         .setName('eventrole')
         .setDescription('Set the required role to use the event host command.')
-        .addRoleOption(option => option.addRoleOption(option => option.setName('role').setDescription('Select the host permission role').setRequired(true)))
+        .addRoleOption(option => option.setName('role').setDescription('Select the host permission role').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
@@ -107,7 +110,7 @@ client.on('interactionCreate', async interaction => {
         if (!settings[guildId]) settings[guildId] = {};
         settings[guildId].channelId = targetChannel.id;
         saveSettings(settings);
-        await interaction.reply({ content: `✨ **Success!** Event destination set to: <#${targetChannel.id}>`, ephemeral: true });
+        return await interaction.reply({ content: `✨ **Success!** Event destination set to: <#${targetChannel.id}>`, ephemeral: true });
     }
 
     if (interaction.commandName === 'eventrole') {
@@ -115,94 +118,85 @@ client.on('interactionCreate', async interaction => {
         if (!settings[guildId]) settings[guildId] = {};
         settings[guildId].roleId = targetRole.id;
         saveSettings(settings);
-        await interaction.reply({ content: `🛡️ **Success!** Only users with <@&${targetRole.id}> can now host events.`, ephemeral: true });
+        return await interaction.reply({ content: `🛡️ **Success!** Only users with <@&${targetRole.id}> can now host events.`, ephemeral: true });
     }
 
     if (interaction.commandName === 'createevent') {
-        // If they use it inside a guild, redirect them or execute normally
-        if (interaction.guild) {
-            const reqRoleId = settings[guildId]?.roleId;
-            if (reqRoleId && !interaction.member.roles.cache.has(reqRoleId)) {
-                return await interaction.reply({ content: `❌ **Access Denied!** You don't have the required host role to do this!`, ephemeral: true });
-            }
-            await processAndPostEvent(interaction, settings, interaction.guildId);
+        const title = interaction.options.getString('title');
+        let link = interaction.options.getString('link');
+        const duration = interaction.options.getNumber('duration');
+        const unit = interaction.options.getString('unit');
+        const desc = interaction.options.getString('desc') || 'No description provided.';
+
+        if (!link.startsWith('http://') && !link.startsWith('https://')) {
+            link = 'https://' + link;
         }
-    }
-});
 
-// Separate handler to process events from anywhere (DM or Server Guild)
-async function processAndPostEvent(source, settings, singleGuildId = null) {
-    const isInteraction = source.isChatInputCommand && source.isChatInputCommand();
-    const user = isInteraction ? source.user : source.author;
+        const hostMention = `@${interaction.user.username}`;
+        let msToAdd = 0;
+        if (unit === 'm') msToAdd = duration * 60 * 1000;
+        if (unit === 'h') msToAdd = duration * 60 * 60 * 1000;
+        if (unit === 'd') msToAdd = duration * 24 * 60 * 60 * 1000;
 
-    const title = isInteraction ? source.options.getString('title') : null; // DMs use arguments instead of slash parameters
-    // Note: To easily handle DMs, the bot registers global slash commands. Discord allows slash commands in DMs!
-}
+        const futureUnixTimestamp = Math.floor((Date.now() + msToAdd) / 1000);
+        const relativeTimeTag = `<t:${futureUnixTimestamp}:R>`;
 
-// Full execution handling context block inside interaction check:
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== 'createevent') return;
+        let postedCount = 0;
+        let missingRoleServers = 0;
 
-    const settings = loadSettings();
-    const title = interaction.options.getString('title');
-    let link = interaction.options.getString('link');
-    const duration = interaction.options.getNumber('duration');
-    const unit = interaction.options.getString('unit');
-    const desc = interaction.options.getString('desc') || 'No description provided.';
+        // Loop over every server the bot lives in
+        for (const [id, guild] of client.guilds.cache) {
+            const guildSettings = settings[id];
+            const targetChannelId = guildSettings?.channelId;
+            const requiredRoleId = guildSettings?.roleId;
 
-    if (!link.startsWith('http://') && !link.startsWith('https://')) link = 'https://' + link;
+            if (!targetChannelId) continue; 
 
-    const hostMention = `@${interaction.user.username}`;
-    let msToAdd = 0;
-    if (unit === 'm') msToAdd = duration * 60 * 1000;
-    if (unit === 'h') msToAdd = duration * 60 * 60 * 1000;
-    if (unit === 'd') msToAdd = duration * 24 * 60 * 60 * 1000;
+            try {
+                const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+                if (!member) continue; 
 
-    const futureUnixTimestamp = Math.floor((Date.now() + msToAdd) / 1000);
-    const relativeTimeTag = `<t:${futureUnixTimestamp}:R>`;
+                // Strictly check if they have the required role setup on this server
+                if (requiredRoleId && !member.roles.cache.has(requiredRoleId)) {
+                    missingRoleServers++;
+                    continue; 
+                }
 
-    let postedCount = 0;
-    
-    // LOOP OVER EVERY SINGLE GUILD THE BOT IS INSTALLED IN
-    for (const [id, guild] of client.guilds.cache) {
-        const guildSettings = settings[id];
-        const targetChannelId = guildSettings?.channelId;
-        const requiredRoleId = guildSettings?.roleId;
+                const hostServerName = member.nickname || member.displayName || interaction.user.username;
+                const targetChannel = guild.channels.cache.get(targetChannelId);
 
-        if (!targetChannelId) continue; // Skip server if channel isn't set up
+                if (targetChannel) {
+                    const eventEmbed = new EmbedBuilder()
+                        .setColor(0x00FF00)
+                        .setTitle(`**${title} by ${hostServerName} (${hostMention})**`)
+                        .setDescription(desc)
+                        .addFields(
+                            { name: '⏳ Starting in', value: relativeTimeTag, inline: false },
+                            { name: '🔗 Event Link', value: link, inline: false }
+                        )
+                        .setTimestamp();
 
-        try {
-            // Check if user exists in that server and has permission roles
-            const member = await guild.members.fetch(interaction.user.id).catch(() => null);
-            if (!member) continue; // Skip if user isn't in this server
-
-            if (requiredRoleId && !member.roles.cache.has(requiredRoleId)) continue; // Skip if they lack permission roles on this server
-
-            const hostServerName = member.nickname || member.displayName || interaction.user.username;
-            const targetChannel = guild.channels.cache.get(targetChannelId);
-
-            if (targetChannel) {
-                const eventEmbed = new EmbedBuilder()
-                    .setColor(0x00FF00)
-                    .setTitle(`**${title} by ${hostServerName} (${hostMention})**`)
-                    .setDescription(desc)
-                    .addFields(
-                        { name: '⏳ Starting in', value: relativeTimeTag, inline: false },
-                        { name: '🔗 Event Link', value: link, inline: false }
-                    )
-                    .setTimestamp();
-
-                const rolePingText = `|| <@&1512735552426741910> ||`;
-                await targetChannel.send({ embeds: [eventEmbed], content: rolePingText });
-                postedCount++;
+                    const rolePingText = `|| <@&1512735552426741910> ||`;
+                    await targetChannel.send({ embeds: [eventEmbed], content: rolePingText });
+                    postedCount++;
+                }
+            } catch (err) {
+                console.error(`Error processing server loop for guild ${id}:`, err);
             }
-        } catch (err) {
-            console.error(`Error processing server loop for guild ${id}:`, err);
         }
-    }
 
-    await interaction.reply({ content: `🚀 **Blast Off!** Event successfully published to **${postedCount}** configured server channels!`, ephemeral: true });
+        if (postedCount === 0) {
+            let errorMsg = `❌ **Could not post event anywhere.**`;
+            if (missingRoleServers > 0) {
+                errorMsg += ` You lack the required permission roles configured on the target servers!`;
+            } else {
+                errorMsg += ` Make sure the destination servers have set up an \`/eventchannel\` first.`;
+            }
+            return await interaction.reply({ content: errorMsg, ephemeral: true });
+        }
+
+        await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
+    }
 });
 
 client.login(process.env.DISCORD_TOKEN);
