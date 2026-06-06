@@ -29,7 +29,7 @@ app.get('/callback', async (req, res) => {
 app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === BOT CODE WITH UNIQUE COMMANDS & ROBOLOX LINKS ===
+// === BOT CODE WITH NICKNAME FETCH & SPOILER ROLE PING ===
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] }); 
 
 const commands = [
@@ -99,8 +99,19 @@ client.on('interactionCreate', async interaction => {
             link = 'https://www.roblox.com/' + link.replace(/^(https?:\/\/)?(www\.)?/, '');
         }
 
-        // Pulls the user's specific server/guild username (nickname)
-        const hostServerName = interaction.member.displayName;
+        // FORCE A FRESH FETCH FROM THE SERVERS TARGET GUILD REGISTRY FOR TRUE NICKNAMES
+        let hostServerName = interaction.user.displayName;
+        try {
+            const targetMember = await interaction.guild.members.fetch(interaction.user.id);
+            if (targetMember && targetMember.nickname) {
+                hostServerName = targetMember.nickname;
+            } else if (targetMember && targetMember.displayName) {
+                hostServerName = targetMember.displayName;
+            }
+        } catch (err) {
+            console.error("Failed fetching live profile metadata registry", err);
+        }
+
         const hostMention = `@${interaction.user.username}`; 
 
         let msToAdd = 0;
@@ -121,14 +132,17 @@ client.on('interactionCreate', async interaction => {
             )
             .setTimestamp();
 
+        // Target role tag with a clean spoiler block line underneath the main card
+        const rolePingText = `|| <@&1512735552426741910> ||`;
+
         const finalTargetId = fallbackChannelId || interaction.channelId;
         const sendChannel = interaction.guild.channels.cache.get(finalTargetId);
 
         if (sendChannel) {
-            await sendChannel.send({ embeds: [eventEmbed] });
+            await sendChannel.send({ embeds: [eventEmbed], content: rolePingText });
             await interaction.reply({ content: `✅ Event successfully posted to <#${finalTargetId}>!`, ephemeral: true });
         } else {
-            await interaction.reply({ embeds: [eventEmbed] });
+            await interaction.reply({ embeds: [eventEmbed], content: rolePingText });
         }
     }
 });
