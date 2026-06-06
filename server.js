@@ -1,11 +1,11 @@
 const express = require('express');
 const axios = require('axios');
-const { Client, GatewayIntentBits } = require('discord.js'); // Added Discord Bot Client
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. THIS KEEPS YOUR WEB CALLBACK RUNNING
+// === KEEPING YOUR ORIGINAL OAUTH2 CODE ===
 app.get('/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('No code provided');
@@ -28,12 +28,106 @@ app.get('/callback', async (req, res) => {
 
 app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
-// 2. THIS FORCES YOUR BOT TO GO ONLINE 24/7
+
+// === NEW BOT CODE WITH PERSISTENT CHANNEL ROUTING ===
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.once('ready', () => {
+const commands = [
+    // 1. Updated /event command config
+    new SlashCommandBuilder()
+        .setName('event')
+        .setDescription('Create a new server event!')
+        .addStringOption(option => option.setName('title').setDescription('Event title').setRequired(true))
+        .addStringOption(option => option.setName('link').setDescription('Event link').setRequired(true))
+        .addNumberOption(option => option.setName('duration').setDescription('Time value (e.g. 30, 2, 5)').setRequired(true))
+        .addStringOption(option => 
+            option.setName('unit')
+                .setDescription('Time unit')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'Minutes', value: 'm' },
+                    { name: 'Hours', value: 'h' },
+                    { name: 'Days', value: 'd' }
+                )
+        )
+        .addStringOption(option => option.setName('desc').setDescription('Event description').setRequired(false)),
+
+    // 2. Brand new configuration routing setup command (Only Server Admins/Owners can run it)
+    new SlashCommandBuilder()
+        .setName('setchannel')
+        .setDescription('Set the target log channel for all /event posts.')
+        .addChannelOption(option => option.setName('target').setDescription('Select the target chat channel').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+].map(command => command.toJSON());
+
+client.once('ready', async () => {
     console.log(`Boom! ${client.user.tag} is officially ONLINE! 🥀`);
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    try {
+        await rest.put(Routes.applicationCommands('1512761665719111892'), { body: commands });
+    } catch (error) {
+        console.error(error);
+    }
 });
 
-// Logs the bot user into the Discord gateway using a hidden bot token
+// Runtime fallback variable if Render variable hasn't synced yet
+let fallbackChannelId = null;
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+
+    // A. CONFIGURATION HANDLER RUN BY SERVER OWNER
+    if (interaction.commandName === 'setchannel') {
+        const targetChannel = interaction.options.getChannel('target');
+        fallbackChannelId = targetChannel.id; // Cache variable inside server instance memory
+
+        await interaction.reply({ 
+            content: `✨ **Success!** New main event logs destination updated to: <#${targetChannel.id}>`, 
+            ephemeral: true 
+        });
+    }
+
+    // B. EVENT POST HANDLER
+    if (interaction.commandName === 'event') {
+        const title = interaction.options.getString('title');
+        const link = interaction.options.getString('link');
+        const duration = interaction.options.getNumber('duration');
+        const unit = interaction.options.getString('unit');
+        const desc = interaction.options.getString('desc') || 'No description provided.';
+        
+        const hostDisplayName = interaction.user.displayName; 
+        const hostMention = `@${interaction.user.username}`; 
+
+        let msToAdd = 0;
+        if (unit === 'm') msToAdd = duration * 60 * 1000;
+        if (unit === 'h') msToAdd = duration * 60 * 60 * 1000;
+        if (unit === 'd') msToAdd = duration * 24 * 60 * 60 * 1000;
+
+        const futureUnixTimestamp = Math.floor((Date.now() + msToAdd) / 1000);
+        const relativeTimeTag = `<t:${futureUnixTimestamp}:R>`; 
+
+        const eventEmbed = new EmbedBuilder()
+            .setColor(0xFFFF00) 
+            .setTitle(`**${title} by ${hostDisplayName} (${hostMention})**`) 
+            .setDescription(desc)
+            .addFields(
+                { name: '⏳ Starting in', value: relativeTimeTag, inline: false },
+                { name: '🔗 Event Link', value: link, inline: false }
+            )
+            .setTimestamp();
+
+        // Dynamically find where to post the output payload card
+        const finalTargetId = fallbackChannelId || interaction.channelId;
+        const sendChannel = interaction.guild.channels.cache.get(finalTargetId);
+
+        if (sendChannel) {
+            await sendChannel.send({ embeds: [eventEmbed] });
+            await interaction.reply({ content: `✅ Event successfully routed to <#${finalTargetId}>!`, ephemeral: true });
+        } else {
+            // Safe fallback loop to current text stream if configured channel gets deleted
+            await interaction.reply({ embeds: [eventEmbed] });
+        }
+    }
+});
+
 client.login(process.env.DISCORD_TOKEN);
