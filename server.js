@@ -29,13 +29,13 @@ app.get('/callback', async (req, res) => {
 app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === NEW BOT CODE WITH PERSISTENT CHANNEL ROUTING ===
+// === BOT CODE WITH UNIQUE COMMAND NAMES ===
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const commands = [
-    // 1. Updated /event command config
+    // Changed name to /createevent to avoid the turtle bot conflict!
     new SlashCommandBuilder()
-        .setName('event')
+        .setName('createevent')
         .setDescription('Create a new server event!')
         .addStringOption(option => option.setName('title').setDescription('Event title').setRequired(true))
         .addStringOption(option => option.setName('link').setDescription('Event link').setRequired(true))
@@ -52,10 +52,10 @@ const commands = [
         )
         .addStringOption(option => option.setName('desc').setDescription('Event description').setRequired(false)),
 
-    // 2. Brand new configuration routing setup command (Only Server Admins/Owners can run it)
+    // Changed name to /eventchannel as requested
     new SlashCommandBuilder()
-        .setName('setchannel')
-        .setDescription('Set the target log channel for all /event posts.')
+        .setName('eventchannel')
+        .setDescription('Set the target channel for your hosted events.')
         .addChannelOption(option => option.setName('target').setDescription('Select the target chat channel').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
@@ -64,31 +64,33 @@ client.once('ready', async () => {
     console.log(`Boom! ${client.user.tag} is officially ONLINE! 🥀`);
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
+        console.log('Refreshing application (/) commands...');
         await rest.put(Routes.applicationCommands('1512761665719111892'), { body: commands });
+        console.log('Commands successfully registered!');
     } catch (error) {
         console.error(error);
     }
 });
 
-// Runtime fallback variable if Render variable hasn't synced yet
+// Instance cache for the channel ID routing
 let fallbackChannelId = null;
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // A. CONFIGURATION HANDLER RUN BY SERVER OWNER
-    if (interaction.commandName === 'setchannel') {
+    // A. SET ROUTING CHANNEL
+    if (interaction.commandName === 'eventchannel') {
         const targetChannel = interaction.options.getChannel('target');
-        fallbackChannelId = targetChannel.id; // Cache variable inside server instance memory
+        fallbackChannelId = targetChannel.id;
 
         await interaction.reply({ 
-            content: `✨ **Success!** New main event logs destination updated to: <#${targetChannel.id}>`, 
+            content: `✨ **Success!** Event logs destination set to: <#${targetChannel.id}>`, 
             ephemeral: true 
         });
     }
 
-    // B. EVENT POST HANDLER
-    if (interaction.commandName === 'event') {
+    // B. RUN THE EVENT POST
+    if (interaction.commandName === 'createevent') {
         const title = interaction.options.getString('title');
         const link = interaction.options.getString('link');
         const duration = interaction.options.getNumber('duration');
@@ -116,15 +118,13 @@ client.on('interactionCreate', async interaction => {
             )
             .setTimestamp();
 
-        // Dynamically find where to post the output payload card
         const finalTargetId = fallbackChannelId || interaction.channelId;
         const sendChannel = interaction.guild.channels.cache.get(finalTargetId);
 
         if (sendChannel) {
             await sendChannel.send({ embeds: [eventEmbed] });
-            await interaction.reply({ content: `✅ Event successfully routed to <#${finalTargetId}>!`, ephemeral: true });
+            await interaction.reply({ content: `✅ Event successfully posted to <#${finalTargetId}>!`, ephemeral: true });
         } else {
-            // Safe fallback loop to current text stream if configured channel gets deleted
             await interaction.reply({ embeds: [eventEmbed] });
         }
     }
