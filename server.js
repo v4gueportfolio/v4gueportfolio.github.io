@@ -5,7 +5,7 @@ const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuild
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === KEEPING YOUR ORIGINAL OAUTH2 CODE ===
+// === KEEPING YOUR ORIGINAL OAUTH2 CODE (ANONYMOUS VERSION) ===
 app.get('/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('No code provided');
@@ -19,7 +19,7 @@ app.get('/callback', async (req, res) => {
         }), {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
-        res.send('Bot authorized successfully! You can close this tab now, Shafir.');
+        res.send('Bot authorized successfully! You can close this tab now.');
     } catch (error) {
         console.error(error.response?.data || error.message);
         res.status(500).send('OAuth2 Exchange Failed');
@@ -29,7 +29,7 @@ app.get('/callback', async (req, res) => {
 app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === BOT CODE WITH MANDATORY ROBLOX LINK VALIDATION ===
+// === BOT CODE - ACCEPTS ALL LINKS (ROBLOX, KAHOOT, ETC.) ===
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] }); 
 
 const commands = [
@@ -37,7 +37,7 @@ const commands = [
         .setName('createevent')
         .setDescription('Create a new server event!')
         .addStringOption(option => option.setName('title').setDescription('Event title').setRequired(true))
-        .addStringOption(option => option.setName('link').setDescription('Event link (MUST be a valid Roblox link)').setRequired(true))
+        .addStringOption(option => option.setName('link').setDescription('Event link (Kahoot, Roblox, etc.)').setRequired(true))
         .addNumberOption(option => option.setName('duration').setDescription('Time value (e.g. 30, 2, 5)').setRequired(true))
         .addStringOption(option => 
             option.setName('unit')
@@ -87,15 +87,7 @@ client.on('interactionCreate', async interaction => {
         const unit = interaction.options.getString('unit');
         const desc = interaction.options.getString('desc') || 'No description provided.';
         
-        // STRICT ROBLOX CHECK - Throws warning error instantly if condition fails
-        if (!link.toLowerCase().includes('roblox.com')) {
-            return await interaction.reply({
-                content: `⚠️ **Hold up vro!** That is not a valid Roblox link. Please submit a real \`roblox.com\` web URL! 🥀`,
-                ephemeral: true
-            });
-        }
-
-        // Clean formatting validation check loop
+        // Auto-prepends protocol formatting smoothly if they drop a raw domain string
         if (!link.startsWith('http://') && !link.startsWith('https://')) {
             link = 'https://' + link;
         }
