@@ -99,24 +99,22 @@ client.once('ready', async () => {
     }
 
     // === AUTOMATED SERVER STATS COUNTER ===
-    // Replace these placeholder strings with your actual Voice Channel IDs, Shafir!
     const TOTAL_MEMBERS_CH_ID = '1512730703715106836';
     const BOTS_CH_ID = '1512731743696977960';
     
     async function updateServerStats() {
         try {
-            // Loop over all guilds your bot is inside
             for (const [guildId, guild] of client.guilds.cache) {
-                // Fetch full member chunk so the counts aren't stale
                 await guild.members.fetch().catch(() => null);
 
-                const totalMembers = guild.memberCount;
+                // Filter out the bot users entirely
                 const totalBots = guild.members.cache.filter(m => m.user.bot).size;
+                const realHumans = guild.memberCount - totalBots;
 
                 const totalCh = guild.channels.cache.get(TOTAL_MEMBERS_CH_ID);
                 const botsCh = guild.channels.cache.get(BOTS_CH_ID);
 
-                if (totalCh) await totalCh.setName(`Members: ${totalMembers}`).catch(() => null);
+                if (totalCh) await totalCh.setName(`Members: ${realHumans}`).catch(() => null);
                 if (botsCh) await botsCh.setName(`Bots: ${totalBots}`).catch(() => null);
             }
             console.log('Server stats updated smoothly, no cap!');
@@ -125,7 +123,6 @@ client.once('ready', async () => {
         }
     }
 
-    // Run immediately on boot, then update every 10 minutes (Discord API limit safety)
     updateServerStats();
     setInterval(updateServerStats, 600000);
 });
