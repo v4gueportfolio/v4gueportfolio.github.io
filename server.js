@@ -21,7 +21,7 @@ app.get('/callback', async (req, res) => {
         });
 
         console.log("Success! Token received:", response.data.access_token);
-        res.send('Bot authorized successfully! You can close this tab now, Shafir.');
+        res.send('Bot authorized successfully! You can close this tab now.');
     } catch (error) {
         console.error(error.response?.data || error.message);
         res.status(500).send('OAuth2 Exchange Failed');
