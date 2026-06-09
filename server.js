@@ -73,6 +73,7 @@ const commands = [
                     { name: 'Days', value: 'd' }
                 )
         )
+        .addNumberOption(option => option.setName('robux').setDescription('Robux prize amount').setRequired(true))
         .addStringOption(option => option.setName('desc').setDescription('Event description').setRequired(false)),
 
     new SlashCommandBuilder()
@@ -171,6 +172,7 @@ client.on('interactionCreate', async interaction => {
         let link = interaction.options.getString('link');
         const duration = interaction.options.getNumber('duration');
         const unit = interaction.options.getString('unit');
+        const robux = interaction.options.getNumber('robux');
         const desc = interaction.options.getString('desc') || 'No description provided.';
 
         if (!link.startsWith('http://') && !link.startsWith('https://')) {
@@ -211,8 +213,8 @@ client.on('interactionCreate', async interaction => {
                 if (targetChannel) {
                     const eventEmbed = new EmbedBuilder()
                         .setColor(0x00FF00)
-                        .setTitle(`**${title} by ${hostServerName} (${hostMention})**`)
-                        .setDescription(desc)
+                        .setTitle(`# ${title} - ${robux} R$`)
+                        .setDescription(`${desc}\n\n**By ${hostServerName} (${hostMention})**`)
                         .addFields(
                             { name: '⏳ Starting in', value: relativeTimeTag, inline: false },
                             { name: '🔗 Event Link', value: link, inline: false }
