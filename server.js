@@ -86,7 +86,19 @@ const commands = [
         .setName('eventrole')
         .setDescription('Set the required role to use the event host command.')
         .addRoleOption(option => option.setName('role').setDescription('Select the host permission role').setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('proofchannel')
+        .setDescription('Set the target channel where event proof is posted.')
+        .addChannelOption(option => option.setName('target').setDescription('Select the target proof channel').setRequired(true).addChannelTypes(ChannelType.GuildText))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('createproof')
+        .setDescription('Submit proof for an event.')
+        .addStringOption(option => option.setName('title').setDescription('The title of the event/proof').setRequired(true))
+        .addAttachmentOption(option => option.setName('image').setDescription('Upload proof image').setRequired(true))
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -167,6 +179,47 @@ client.on('interactionCreate', async interaction => {
         return await interaction.reply({ content: `🛡️ **Success!** Only users with <@&${targetRole.id}> can now host events.`, ephemeral: true });
     }
 
+    if (interaction.commandName === 'proofchannel') {
+        const targetChannel = interaction.options.getChannel('target');
+        if (!settings[guildId]) settings[guildId] = {};
+        settings[guildId].proofChannelId = targetChannel.id;
+        saveSettings(settings);
+        return await interaction.reply({ content: `📸 **Success!** Proof destination set to: <#${targetChannel.id}>`, ephemeral: true });
+    }
+
+    if (interaction.commandName === 'createproof') {
+        const title = interaction.options.getString('title');
+        const imageFile = interaction.options.getAttachment('image');
+        const proofChannelId = settings[guildId]?.proofChannelId;
+
+        if (!proofChannelId) {
+            return await interaction.reply({ content: `❌ **Failed!** An administrator needs to configure a \`/proofchannel\` first!`, ephemeral: true });
+        }
+
+        const proofChannel = interaction.guild.channels.cache.get(proofChannelId);
+        if (!proofChannel) {
+            return await interaction.reply({ content: `❌ **Failed!** Configured proof channel was not found.`, ephemeral: true });
+        }
+
+        const submitterName = interaction.member.nickname || interaction.member.displayName || interaction.user.username;
+        const submitterMention = `@${interaction.user.username}`;
+
+        const proofEmbed = new EmbedBuilder()
+            .setColor(0x00FFFF)
+            .setTitle(`Proof of ${title}`)
+            .setDescription(`**By ${submitterName} (${submitterMention})**`)
+            .setImage(imageFile.url)
+            .setTimestamp();
+
+        try {
+            await proofChannel.send({ embeds: [proofEmbed] });
+            return await interaction.reply({ content: `🚀 **Boom!** Proof successfully submitted to <#${proofChannelId}>!`, ephemeral: true });
+        } catch (err) {
+            console.error(err);
+            return await interaction.reply({ content: `❌ **Error:** Failed sending proof packet to the logs.`, ephemeral: true });
+        }
+    }
+
     if (interaction.commandName === 'createevent') {
         const title = interaction.options.getString('title');
         let link = interaction.options.getString('link');
@@ -213,8 +266,8 @@ client.on('interactionCreate', async interaction => {
                 if (targetChannel) {
                     const eventEmbed = new EmbedBuilder()
                         .setColor(0x00FF00)
-                        .setTitle(`# ${title} - ${robux} R$`)
-                        .setDescription(`${desc}\n\n**By ${hostServerName} (${hostMention})**`)
+                        .setTitle(`${title} - ${robux} R$`)
+                        .setDescription(`**By ${hostServerName} (${hostMention})**\n\n${desc}`)
                         .addFields(
                             { name: '⏳ Starting in', value: relativeTimeTag, inline: false },
                             { name: '🔗 Event Link', value: link, inline: false }
