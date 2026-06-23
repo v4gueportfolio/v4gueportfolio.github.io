@@ -102,7 +102,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel video!')
+        .setDescription('Download an Instagram Reel video accurately!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -291,7 +291,7 @@ client.on('interactionCreate', async interaction => {
             if (missingRoleServers > 0) {
                 errorMsg += ` You lack the required permission roles configured on the target servers!`;
             } else {
-                errorMsg += ` Ostensibly, make sure the destination servers have set up an \`/eventchannel\` first.`;
+                errorMsg += ` Make sure the destination servers have set up an \`/eventchannel\` first.`;
             }
             return await interaction.reply({ content: errorMsg, ephemeral: true });
         }
@@ -299,41 +299,42 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === ROCK SOLID DDINSTAGRAM CONVERTER LOGIC ===
+    // === HIGHLY STABLE MOUNTED CORE DOWNLOAD ENGINE ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply(); 
 
         try {
-            // Swap standard domain out for the ddinstagram engine structure
-            const ddUrl = reelUrl
-                .replace('instagram.com', 'ddinstagram.com')
-                .replace('www.', '');
-
-            // Request the underlying page layout meta details directly
-            const pageData = await axios.get(ddUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-                timeout: 7000
+            // Processing through an unthrottled upstream distribution tunnel
+            const response = await axios.post('https://cobalt.tools/api/json', {
+                url: reelUrl,
+                videoQuality: '720',
+                filenamePattern: 'classic'
+            }, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                },
+                timeout: 9500
             });
 
-            // Extract the og:video meta structural source tag raw payload
-            const match = pageData.data.match(/<meta\s+property="og:video"\s+content="([^"]+)"/i);
-            const directVideoUrl = match ? match[1].replace(/&amp;/g, '&') : null;
+            const directVideoUrl = response.data?.url;
 
             if (!directVideoUrl) {
                 return await interaction.editReply({ 
-                    content: '❌ **Failed!** Couldn\'t extract the video source. Double check if the reel link is broken or private!' 
+                    content: '❌ **Extraction Blocked!** The underlying layout parser failed to isolate a clean MP4 stream. Confirm the profile is completely public.' 
                 });
             }
 
             const attachment = new AttachmentBuilder(directVideoUrl, { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel Downloaded Successfully!**`, files: [attachment] });
+            return await interaction.editReply({ content: `🎬 **Reel isolated successfully!** Here you go:`, files: [attachment] });
 
         } catch (err) {
-            console.error('IG Parsing Error:', err.message);
+            console.error('Tunnel processing error:', err.message);
             return await interaction.editReply({ 
-                content: '❌ **Error:** The download engine timed out. Instagram servers are throttling requests, Shafir! Try again in a minute.' 
+                content: '❌ **Error:** High-security bypass failed to execute. Try again in a minute, Shafir!' 
             });
         }
     }
