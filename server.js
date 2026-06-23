@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType, AttachmentBuilder } = require('discord.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -98,7 +98,13 @@ const commands = [
         .setName('createproof')
         .setDescription('Submit proof for an event.')
         .addStringOption(option => option.setName('title').setDescription('The title of the event/proof').setRequired(true))
-        .addAttachmentOption(option => option.setName('image').setDescription('Upload proof image').setRequired(true))
+        .addAttachmentOption(option => option.setName('image').setDescription('Upload proof image').setRequired(true)),
+
+    // NEW /IG REEL DOWNLOADER COMMAND
+    new SlashCommandBuilder()
+        .setName('ig')
+        .setDescription('Download an Instagram Reel video!')
+        .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -294,6 +300,32 @@ client.on('interactionCreate', async interaction => {
         }
 
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
+    }
+
+    // === NEW /IG EXECUTION LOGIC ===
+    if (interaction.commandName === 'ig') {
+        const reelUrl = interaction.options.getString('link');
+        
+        await interaction.deferReply(); // Processing files takes seconds, avoid timeouts
+
+        try {
+            // Using a reliable open api pipeline for downing media streams
+            const apiEndpoint = `https://api.vkrdown.com/api/?url=${encodeURIComponent(reelUrl)}`;
+            const res = await axios.get(apiEndpoint);
+            
+            const videoUrl = res.data?.data?.url || res.data?.url;
+
+            if (!videoUrl) {
+                return await interaction.editReply({ content: '❌ **Failed!** Couldn\'t scrape a valid video stream from that link. Check if it\'s public!' });
+            }
+
+            const attachment = new AttachmentBuilder(videoUrl, { name: 'instagram_reel.mp4' });
+            return await interaction.editReply({ content: `🎬 **Reel Downloaded!** Here you go:`, files: [attachment] });
+
+        } catch (err) {
+            console.error('IG Download Error:', err.message);
+            return await interaction.editReply({ content: '❌ **Error:** Failed fetching the media packet. Try again later, Shafir!' });
+        }
     }
 });
 
