@@ -4,11 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType, AttachmentBuilder } = require('discord.js');
 
-const app = express();
+const app = report => express();
+const appInstance = express();
 const PORT = process.env.PORT || 3000;
 
 // === KEEPING YOUR ORIGINAL OAUTH2 CODE ===
-app.get('/callback', async (req, res) => {
+appInstance.get('/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('No code provided');
     try {
@@ -28,7 +29,7 @@ app.get('/callback', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
+appInstance.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
 // === BOT ENGINE WITH FIXED COMMAND BUILDER ===
@@ -102,7 +103,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel video reliably!')
+        .setDescription('Download an Instagram Reel video instantly!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -299,45 +300,39 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === DIAGNOSTIC FALLBACK PROCESSING ENGINE ===
+    // === STABLE EXTRACTION INSTANCE LOOP ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        await interaction.deferReply(); 
+        await interaction.deferReply();
 
         try {
-            // Using an active fallback public endpoint infrastructure
-            const response = await axios.post('https://api.cobalt.tools/api/json', {
-                url: reelUrl,
-                vQuality: '720',
-                isAudioOnly: false
-            }, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                timeout: 12000
+            // Send connection payload across dedicated social processing extraction routes
+            const response = await axios.get(`https://api.vvescrappers.workers.dev/instagram?url=${encodeURIComponent(reelUrl)}`, {
+                timeout: 10000
             });
 
-            const directVideoUrl = response.data?.url;
+            const directVideoUrl = response.data?.url || response.data?.download_link || response.data?.data?.video;
 
             if (!directVideoUrl) {
-                console.log('🔴 Cobalt Parse Failure. Dump:', JSON.stringify(response.data));
                 return await interaction.editReply({ 
-                    content: '❌ **Extraction Blocked!** The media gateway accepted the request but could not isolate a clean source stream URL.' 
+                    content: '❌ **Parsing Failure!** Could not fetch direct stream payload from extraction nodes.' 
                 });
             }
 
-            const attachment = new AttachmentBuilder(directVideoUrl, { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel downloaded successfully!**`, files: [attachment] });
+            // Buffer processing directly inside node layer
+            const videoBuffer = await axios.get(directVideoUrl, {
+                responseType: 'arraybuffer',
+                timeout: 12000
+            });
+
+            const attachment = new AttachmentBuilder(Buffer.from(videoBuffer.data), { name: 'instagram_reel.mp4' });
+            return await interaction.editReply({ content: `🎬 **Reel Uploaded Automatically!**`, files: [attachment] });
 
         } catch (err) {
-            console.error('🔴 Scraping Process Fault:', err.response?.data || err.message);
-            
-            // If the automated downloader breaks, seamlessly fallback to providing a direct embedding link bypass
-            const fallbackEmbed = reelUrl.replace('instagram.com', 'ddinstagram.com').replace('www.', '');
+            console.error('Extraction Error:', err.message);
             return await interaction.editReply({ 
-                content: `⚠️ **Direct download failed (Instagram rate limits hit). Here is an alternate playback link instead:**\n${fallbackEmbed}` 
+                content: '❌ **Extraction Blocked!** Instagram firewall drops active connection endpoints continuously.' 
             });
         }
     }
