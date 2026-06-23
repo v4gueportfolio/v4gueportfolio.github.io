@@ -100,7 +100,6 @@ const commands = [
         .addStringOption(option => option.setName('title').setDescription('The title of the event/proof').setRequired(true))
         .addAttachmentOption(option => option.setName('image').setDescription('Upload proof image').setRequired(true)),
 
-    // NEW /IG REEL DOWNLOADER COMMAND
     new SlashCommandBuilder()
         .setName('ig')
         .setDescription('Download an Instagram Reel video!')
@@ -122,7 +121,7 @@ client.once('ready', async () => {
     const BOTS_CH_ID = '1512731743696977960';
     
     let lastUpdated = 0;
-    const COOLDOWN_MS = 6 * 60 * 1000; // Strict 6-minute cooldown lock
+    const COOLDOWN_MS = 6 * 60 * 1000; 
 
     async function updateServerStats() {
         const now = Date.now();
@@ -156,10 +155,8 @@ client.once('ready', async () => {
         }
     }
 
-    // Force an initial update on startup execution
     updateServerStats();
 
-    // Recheck stats on joins/leaves, but strictly gatekeeped by the 6-minute clock
     client.on('guildMemberAdd', () => updateServerStats());
     client.on('guildMemberRemove', () => updateServerStats());
 });
@@ -302,29 +299,40 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === NEW /IG EXECUTION LOGIC ===
+    // === OPTIMIZED & RESILIENT /IG EXECUTION LOGIC ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        await interaction.deferReply(); // Processing files takes seconds, avoid timeouts
+        await interaction.deferReply(); 
 
         try {
-            // Using a reliable open api pipeline for downing media streams
-            const apiEndpoint = `https://api.vkrdown.com/api/?url=${encodeURIComponent(reelUrl)}`;
-            const res = await axios.get(apiEndpoint);
+            // Primary lookup via a consolidated open proxy service engine
+            const primaryApi = `https://api.scraptik.com/instagram/download?url=${encodeURIComponent(reelUrl)}`;
+            let response = await axios.get(primaryApi, { timeout: 8000 }).catch(() => null);
             
-            const videoUrl = res.data?.data?.url || res.data?.url;
+            let videoUrl = response?.data?.data?.video_url || response?.data?.url;
+
+            // Secondary Fallback if the primary endpoint stalls out
+            if (!videoUrl) {
+                const backupApi = `https://emw-instagram-downloader.vercel.app/api/video?url=${encodeURIComponent(reelUrl)}`;
+                response = await axios.get(backupApi, { timeout: 8000 }).catch(() => null);
+                videoUrl = response?.data?.videoUrl || response?.data?.url;
+            }
 
             if (!videoUrl) {
-                return await interaction.editReply({ content: '❌ **Failed!** Couldn\'t scrape a valid video stream from that link. Check if it\'s public!' });
+                return await interaction.editReply({ 
+                    content: '❌ **Failed!** Scraper mirrors failed to grab a direct MP4 link. Make sure the Reel belongs to a **public account**!' 
+                });
             }
 
             const attachment = new AttachmentBuilder(videoUrl, { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel Downloaded!** Here you go:`, files: [attachment] });
+            return await interaction.editReply({ content: `🎬 **Reel Uploaded!** Here you go:`, files: [attachment] });
 
         } catch (err) {
-            console.error('IG Download Error:', err.message);
-            return await interaction.editReply({ content: '❌ **Error:** Failed fetching the media packet. Try again later, Shafir!' });
+            console.error('IG Download Crash:', err.message);
+            return await interaction.editReply({ 
+                content: '❌ **Error:** Scraper connection dropped. Instagram might be throttling requests right now. Try again shortly!' 
+            });
         }
     }
 });
