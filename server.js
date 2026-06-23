@@ -102,7 +102,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel video!')
+        .setDescription('Download an Instagram Reel video via SaveInsta engine!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -299,39 +299,54 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === OPTIMIZED & RESILIENT /IG EXECUTION LOGIC ===
+    // === SAVEINSTA PROXY BACKEND LOGIC ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply(); 
 
         try {
-            // Primary lookup via a consolidated open proxy service engine
-            const primaryApi = `https://api.scraptik.com/instagram/download?url=${encodeURIComponent(reelUrl)}`;
-            let response = await axios.get(primaryApi, { timeout: 8000 }).catch(() => null);
+            // Proxying request through SaveInsta backend scrapers via unified ajax gateways
+            const saveInstaProxyUrl = `https://saveinsta.to/api/ajaxSearch`;
             
-            let videoUrl = response?.data?.data?.video_url || response?.data?.url;
+            const response = await axios.post(saveInstaProxyUrl, new URLSearchParams({
+                q: reelUrl,
+                t: 'media',
+                lang: 'en'
+            }), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': 'https://saveinsta.to/'
+                },
+                timeout: 9000
+            });
 
-            // Secondary Fallback if the primary endpoint stalls out
-            if (!videoUrl) {
-                const backupApi = `https://emw-instagram-downloader.vercel.app/api/video?url=${encodeURIComponent(reelUrl)}`;
-                response = await axios.get(backupApi, { timeout: 8000 }).catch(() => null);
-                videoUrl = response?.data?.videoUrl || response?.data?.url;
+            // Parse response body data to grab clean video file source
+            let htmlData = response?.data?.data || response?.data;
+            let videoUrlMatch = htmlData?.match(/href="(https:\/\/ download\.saveinsta\.to\/[^"]+)"/i) || htmlData?.match(/href="([^"]+download=1)"/i);
+            
+            let videoUrl = videoUrlMatch ? videoUrlMatch[1] : null;
+
+            if (!videoUrl && htmlData?.includes('download')) {
+                // Second string extractor regex attempt
+                const backupMatch = htmlData.match(/src="([^"]+)"/);
+                if (backupMatch && backupMatch[1].includes('.mp4')) videoUrl = backupMatch[1];
             }
 
             if (!videoUrl) {
                 return await interaction.editReply({ 
-                    content: '❌ **Failed!** Scraper mirrors failed to grab a direct MP4 link. Make sure the Reel belongs to a **public account**!' 
+                    content: '❌ **Failed!** SaveInsta blocking/handling token failed. Verify the target profile is completely public.' 
                 });
             }
 
-            const attachment = new AttachmentBuilder(videoUrl, { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel Uploaded!** Here you go:`, files: [attachment] });
+            const attachment = new AttachmentBuilder(videoUrl, { name: 'saveinsta_reel.mp4' });
+            return await interaction.editReply({ content: `🎬 **SaveInsta Extraction complete!** ✌️`, files: [attachment] });
 
         } catch (err) {
-            console.error('IG Download Crash:', err.message);
+            console.error('SaveInsta Extraction Failure:', err.message);
             return await interaction.editReply({ 
-                content: '❌ **Error:** Scraper connection dropped. Instagram might be throttling requests right now. Try again shortly!' 
+                content: '❌ **Error:** SaveInsta endpoints are dropping connections. Try a mirror endpoint later!' 
             });
         }
     }
