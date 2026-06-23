@@ -102,7 +102,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel video via SaveInsta engine!')
+        .setDescription('Download an Instagram Reel video!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -291,7 +291,7 @@ client.on('interactionCreate', async interaction => {
             if (missingRoleServers > 0) {
                 errorMsg += ` You lack the required permission roles configured on the target servers!`;
             } else {
-                errorMsg += ` Make sure the destination servers have set up an \`/eventchannel\` first.`;
+                errorMsg += ` Ostensibly, make sure the destination servers have set up an \`/eventchannel\` first.`;
             }
             return await interaction.reply({ content: errorMsg, ephemeral: true });
         }
@@ -299,54 +299,41 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === SAVEINSTA PROXY BACKEND LOGIC ===
+    // === ROCK SOLID DDINSTAGRAM CONVERTER LOGIC ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply(); 
 
         try {
-            // Proxying request through SaveInsta backend scrapers via unified ajax gateways
-            const saveInstaProxyUrl = `https://saveinsta.to/api/ajaxSearch`;
-            
-            const response = await axios.post(saveInstaProxyUrl, new URLSearchParams({
-                q: reelUrl,
-                t: 'media',
-                lang: 'en'
-            }), {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://saveinsta.to/'
-                },
-                timeout: 9000
+            // Swap standard domain out for the ddinstagram engine structure
+            const ddUrl = reelUrl
+                .replace('instagram.com', 'ddinstagram.com')
+                .replace('www.', '');
+
+            // Request the underlying page layout meta details directly
+            const pageData = await axios.get(ddUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                timeout: 7000
             });
 
-            // Parse response body data to grab clean video file source
-            let htmlData = response?.data?.data || response?.data;
-            let videoUrlMatch = htmlData?.match(/href="(https:\/\/ download\.saveinsta\.to\/[^"]+)"/i) || htmlData?.match(/href="([^"]+download=1)"/i);
-            
-            let videoUrl = videoUrlMatch ? videoUrlMatch[1] : null;
+            // Extract the og:video meta structural source tag raw payload
+            const match = pageData.data.match(/<meta\s+property="og:video"\s+content="([^"]+)"/i);
+            const directVideoUrl = match ? match[1].replace(/&amp;/g, '&') : null;
 
-            if (!videoUrl && htmlData?.includes('download')) {
-                // Second string extractor regex attempt
-                const backupMatch = htmlData.match(/src="([^"]+)"/);
-                if (backupMatch && backupMatch[1].includes('.mp4')) videoUrl = backupMatch[1];
-            }
-
-            if (!videoUrl) {
+            if (!directVideoUrl) {
                 return await interaction.editReply({ 
-                    content: '❌ **Failed!** SaveInsta blocking/handling token failed. Verify the target profile is completely public.' 
+                    content: '❌ **Failed!** Couldn\'t extract the video source. Double check if the reel link is broken or private!' 
                 });
             }
 
-            const attachment = new AttachmentBuilder(videoUrl, { name: 'saveinsta_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **SaveInsta Extraction complete!** ✌️`, files: [attachment] });
+            const attachment = new AttachmentBuilder(directVideoUrl, { name: 'instagram_reel.mp4' });
+            return await interaction.editReply({ content: `🎬 **Reel Downloaded Successfully!**`, files: [attachment] });
 
         } catch (err) {
-            console.error('SaveInsta Extraction Failure:', err.message);
+            console.error('IG Parsing Error:', err.message);
             return await interaction.editReply({ 
-                content: '❌ **Error:** SaveInsta endpoints are dropping connections. Try a mirror endpoint later!' 
+                content: '❌ **Error:** The download engine timed out. Instagram servers are throttling requests, Shafir! Try again in a minute.' 
             });
         }
     }
