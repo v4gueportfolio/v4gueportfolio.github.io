@@ -102,7 +102,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel video accurately!')
+        .setDescription('Download an Instagram Reel video via APIHut!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -299,42 +299,39 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === HIGHLY STABLE MOUNTED CORE DOWNLOAD ENGINE ===
+    // === APIHUT INTEGRATION IMPLEMENTATION ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply(); 
 
         try {
-            // Processing through an unthrottled upstream distribution tunnel
-            const response = await axios.post('https://cobalt.tools/api/json', {
-                url: reelUrl,
-                videoQuality: '720',
-                filenamePattern: 'classic'
+            const response = await axios.post('https://apihut.in/api/download/videos', {
+                video_url: reelUrl,
+                type: 'instagram'
             }, {
                 headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                    'x-avatar-key': process.env.APIHUT_KEY, 
+                    'Content-Type': 'application/json'
                 },
-                timeout: 9500
+                timeout: 10000
             });
 
-            const directVideoUrl = response.data?.url;
+            const directVideoUrl = response.data?.message?.data?.[0]?.url || response.data?.message?.data?.[0]?.download_link;
 
             if (!directVideoUrl) {
                 return await interaction.editReply({ 
-                    content: '❌ **Extraction Blocked!** The underlying layout parser failed to isolate a clean MP4 stream. Confirm the profile is completely public.' 
+                    content: '❌ **APIHut Failed!** Could not fetch stream link. Make sure the target post is public or verify your API token permissions.' 
                 });
             }
 
             const attachment = new AttachmentBuilder(directVideoUrl, { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel isolated successfully!** Here you go:`, files: [attachment] });
+            return await interaction.editReply({ content: `🎬 **Reel Downloaded via APIHut!**`, files: [attachment] });
 
         } catch (err) {
-            console.error('Tunnel processing error:', err.message);
+            console.error('APIHut Error Log:', err.message);
             return await interaction.editReply({ 
-                content: '❌ **Error:** High-security bypass failed to execute. Try again in a minute, Shafir!' 
+                content: '❌ **Error:** Failed connecting to APIHut gateways. Check your key variable or network traffic bounds.' 
             });
         }
     }
