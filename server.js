@@ -11,13 +11,9 @@ const {
     EmbedBuilder, 
     PermissionFlagsBits, 
     ChannelType,
-    ActionRowBuilder,    
-    ButtonBuilder,       
-    ButtonStyle,
-    AttachmentBuilder    // Added to upload files directly into chat rows
+    AttachmentBuilder    
 } = require('discord.js');
 
-const app = report => express();
 const appInstance = express();
 const PORT = process.env.PORT || 3000;
 
@@ -26,7 +22,7 @@ appInstance.get('/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('No code provided');
     try {
-        const response = await axios.post('https://discord.com/api/v10/oauth2/token', new URLSearchParams({
+        await axios.post('https://discord.com/api/v10/oauth2/token', new URLSearchParams({
             client_id: '1512761665719111892', 
             client_secret: process.env.DISCORD_SECRET, 
             grant_type: 'authorization_code',
@@ -116,7 +112,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Generate an interactive direct file download button for an Instagram link!')
+        .setDescription('Downloads and uploads an Instagram Reel file directly into chat!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -140,7 +136,6 @@ client.once('ready', async () => {
     async function updateServerStats() {
         const now = Date.now();
         if (now - lastUpdated < COOLDOWN_MS) {
-            console.log('Stats update blocked: Cooldown active, cooling down... ⏳');
             return;
         }
 
@@ -163,61 +158,20 @@ client.once('ready', async () => {
                 }
             }
             lastUpdated = Date.now();
-            console.log('Server stats checked and safely updated inside the 6m window!');
         } catch (err) {
             console.error('Stats loop hit a wall:', err);
         }
     }
 
     updateServerStats();
-
     client.on('guildMemberAdd', () => updateServerStats());
     client.on('guildMemberRemove', () => updateServerStats());
 });
 
 client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
     const settings = loadSettings();
     const guildId = interaction.guildId;
-
-    // === DIRECT NATIVE FILE DOWNLOAD ACTION COLLECTOR ===
-    if (interaction.isButton() && interaction.customId.startsWith('dl_ig_')) {
-        await interaction.deferReply({ ephemeral: true });
-        
-        // Isolate the base64 encoded URL parameters passing through the customID key
-        const encryptedLink = interaction.customId.replace('dl_ig_', '');
-        const targetReelUrl = Buffer.from(encryptedLink, 'base64').toString('utf-8');
-
-        try {
-            const proxyTarget = targetReelUrl
-                .replace('instagram.com', 'vxinstagram.com')
-                .replace('www.', '');
-
-            const pageRes = await axios.get(proxyTarget, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Discordbot/2.0' },
-                timeout: 8000
-            });
-
-            const streamMatch = pageRes.data.match(/<meta\s+property=["']og:video["']\s+content=["']([^"']+)["']/i) || 
-                                pageRes.data.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:video["']/i);
-
-            const verifiedVideoUrl = streamMatch ? streamMatch[1] : null;
-
-            if (!verifiedVideoUrl) {
-                return await interaction.editReply({ content: '❌ **Extraction Failed!** The stream engine timed out. Try again shortly.' });
-            }
-
-            const videoBuffer = await axios.get(verifiedVideoUrl, { responseType: 'arraybuffer', timeout: 12000 });
-            const fileAttachment = new AttachmentBuilder(Buffer.from(videoBuffer.data), { name: 'instagram_reel.mp4' });
-
-            return await interaction.editReply({ content: '🎬 **Here is your file, Shafir!** Done completely inside Discord:', files: [fileAttachment] });
-
-        } catch (err) {
-            console.error(err);
-            return await interaction.editReply({ content: '❌ **Upload Failure:** Video file exceeded Discord server size limits.' });
-        }
-    }
-
-    if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'eventchannel') {
         const targetChannel = interaction.options.getChannel('target');
@@ -352,24 +306,44 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === GENERATE THE DIRECT FILE INTERACTION BUTTON ===
+    // === DIRECT IN-LINE VIDEO UPLOAD PIPE ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Package link cleanly using base64 routing blocks inside the customId constraint limits
-        const encodedUrlId = Buffer.from(reelUrl).toString('base64');
+        // Defer interaction with standard visible fallback loader frame
+        await interaction.deferReply();
 
-        const downloadButtonRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`dl_ig_${encodedUrlId}`)
-                .setLabel('📥 Download Video File Directly')
-                .setStyle(ButtonStyle.Primary) // Regular interaction execution button layout
-        );
+        try {
+            // Swap to a specialized backend proxy API that parses the binary files
+            const proxyTarget = `https://api.vxtwitter.com/CombinedAPI/instagram?url=${encodeURIComponent(reelUrl)}`;
 
-        return await interaction.reply({ 
-            content: '💬 **Click the button below to process and pull the video file directly into this chat chatroom:**',
-            components: [downloadButtonRow]
-        });
+            const apiResponse = await axios.get(proxyTarget, { timeout: 10000 });
+            
+            // Extract the direct raw resource mp4 url string safely
+            const directVideoUrl = apiResponse.data?.urls?.[0] || apiResponse.data?.video_url;
+
+            if (!directVideoUrl) {
+                return await interaction.editReply({ content: '❌ **Extraction Failed:** The download proxy was unable to parse this specific link structure.' });
+            }
+
+            // Pull video source straight into memory array buffer streams
+            const videoStream = await axios.get(directVideoUrl, { responseType: 'arraybuffer', timeout: 12000 });
+            const videoBuffer = Buffer.from(videoStream.data);
+
+            const fileAttachment = new AttachmentBuilder(videoBuffer, { name: 'instagram_reel.mp4' });
+
+            // Post file directly right into chat stream without buttons or link text
+            return await interaction.editReply({ 
+                content: '🎬 **Reel downloaded directly into Discord:**', 
+                files: [fileAttachment] 
+            });
+
+        } catch (err) {
+            console.error('Direct Stream Download Fault:', err.message);
+            return await interaction.editReply({ 
+                content: '❌ **Pipeline Failure:** Video file could not be pulled, or it exceeds Discord\'s native size attachment limits.' 
+            });
+        }
     }
 });
 
