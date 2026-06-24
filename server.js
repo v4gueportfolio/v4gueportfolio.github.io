@@ -103,7 +103,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel video instantly!')
+        .setDescription('Download an Instagram Reel via direct embed rendering!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -300,39 +300,60 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === STABLE EXTRACTION INSTANCE LOOP ===
+    // === NATIVE OEMBED RENDER STREAM PIPELINE ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply();
 
         try {
-            // Send connection payload across dedicated social processing extraction routes
-            const response = await axios.get(`https://api.vvescrappers.workers.dev/instagram?url=${encodeURIComponent(reelUrl)}`, {
+            // Format URL directly into the official iframe embed document pipeline
+            let cleanedUrl = reelUrl.split('?')[0];
+            if (!cleanedUrl.endsWith('/')) cleanedUrl += '/';
+            const embedTargetUrl = `${cleanedUrl}embed/captioned/`;
+
+            const embedPage = await axios.get(embedTargetUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                },
                 timeout: 10000
             });
 
-            const directVideoUrl = response.data?.url || response.data?.download_link || response.data?.data?.video;
+            // Extract the direct media stream configurations loaded within the page structure
+            const videoMatch = embedPage.data.match(/"video_url":"([^"]+)"/) || 
+                               embedPage.data.match(/video_src_no_ratelimit["']:\s*["']([^"']+)["']/);
+
+            let directVideoUrl = videoMatch ? videoMatch[1] : null;
+
+            if (!directVideoUrl) {
+                // Fallback to checking the open graph configurations embedded on the rendered frame
+                const ogMatch = embedPage.data.match(/<meta\s+property=["']og:video["']\s+content=["']([^"']+)["']/i);
+                if (ogMatch) directVideoUrl = ogMatch[1];
+            }
 
             if (!directVideoUrl) {
                 return await interaction.editReply({ 
-                    content: '❌ **Parsing Failure!** Could not fetch direct stream payload from extraction nodes.' 
+                    content: '❌ **Extraction Blocked!** Instagram rendered the frame safely but refused to output the raw CDN link to the server container.' 
                 });
             }
 
-            // Buffer processing directly inside node layer
-            const videoBuffer = await axios.get(directVideoUrl, {
+            // Clean unicode sequence markings out of the extracted URL link
+            const verifiedMediaUrl = directVideoUrl.replace(/\\u0026/g, '&');
+
+            const videoBuffer = await axios.get(verifiedMediaUrl, {
                 responseType: 'arraybuffer',
-                timeout: 12000
+                timeout: 15000,
+                headers: { 'User-Agent': 'Mozilla/5.0' }
             });
 
             const attachment = new AttachmentBuilder(Buffer.from(videoBuffer.data), { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel Uploaded Automatically!**`, files: [attachment] });
+            return await interaction.editReply({ content: `🎬 **Reel downloaded directly via embed frame query!**`, files: [attachment] });
 
         } catch (err) {
-            console.error('Extraction Error:', err.message);
+            console.error('Embed Stream Error:', err.message);
             return await interaction.editReply({ 
-                content: '❌ **Extraction Blocked!** Instagram firewall drops active connection endpoints continuously.' 
+                content: '❌ **Pipeline Fault:** The embed routing tree timed out or returned an empty document context.' 
             });
         }
     }
