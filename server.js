@@ -11,9 +11,10 @@ const {
     EmbedBuilder, 
     PermissionFlagsBits, 
     ChannelType,
-    ActionRowBuilder,    // Added for UI row container
-    ButtonBuilder,       // Added for UI interactive button
-    ButtonStyle          // Added for Button styling keys
+    ActionRowBuilder,    
+    ButtonBuilder,       
+    ButtonStyle,
+    AttachmentBuilder    // Added to upload files directly into chat rows
 } = require('discord.js');
 
 const app = report => express();
@@ -115,7 +116,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Generate a clean video download button for an Instagram link!')
+        .setDescription('Generate an interactive direct file download button for an Instagram link!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -175,9 +176,48 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
     const settings = loadSettings();
     const guildId = interaction.guildId;
+
+    // === DIRECT NATIVE FILE DOWNLOAD ACTION COLLECTOR ===
+    if (interaction.isButton() && interaction.customId.startsWith('dl_ig_')) {
+        await interaction.deferReply({ ephemeral: true });
+        
+        // Isolate the base64 encoded URL parameters passing through the customID key
+        const encryptedLink = interaction.customId.replace('dl_ig_', '');
+        const targetReelUrl = Buffer.from(encryptedLink, 'base64').toString('utf-8');
+
+        try {
+            const proxyTarget = targetReelUrl
+                .replace('instagram.com', 'vxinstagram.com')
+                .replace('www.', '');
+
+            const pageRes = await axios.get(proxyTarget, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Discordbot/2.0' },
+                timeout: 8000
+            });
+
+            const streamMatch = pageRes.data.match(/<meta\s+property=["']og:video["']\s+content=["']([^"']+)["']/i) || 
+                                pageRes.data.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:video["']/i);
+
+            const verifiedVideoUrl = streamMatch ? streamMatch[1] : null;
+
+            if (!verifiedVideoUrl) {
+                return await interaction.editReply({ content: '❌ **Extraction Failed!** The stream engine timed out. Try again shortly.' });
+            }
+
+            const videoBuffer = await axios.get(verifiedVideoUrl, { responseType: 'arraybuffer', timeout: 12000 });
+            const fileAttachment = new AttachmentBuilder(Buffer.from(videoBuffer.data), { name: 'instagram_reel.mp4' });
+
+            return await interaction.editReply({ content: '🎬 **Here is your file, Shafir!** Done completely inside Discord:', files: [fileAttachment] });
+
+        } catch (err) {
+            console.error(err);
+            return await interaction.editReply({ content: '❌ **Upload Failure:** Video file exceeded Discord server size limits.' });
+        }
+    }
+
+    if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'eventchannel') {
         const targetChannel = interaction.options.getChannel('target');
@@ -312,27 +352,23 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === SLEEK NATIVE DOWNLOAD BUTTON LINK ROUTER ===
+    // === GENERATE THE DIRECT FILE INTERACTION BUTTON ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Convert input string to the proxy service configuration behind the scenes
-        const cleanMediaStream = reelUrl
-            .replace('instagram.com', 'vxinstagram.com')
-            .replace('www.', '');
+        // Package link cleanly using base64 routing blocks inside the customId constraint limits
+        const encodedUrlId = Buffer.from(reelUrl).toString('base64');
 
-        // Build the physical link interface component block
-        const mediaButtonRow = new ActionRowBuilder().addComponents(
+        const downloadButtonRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setLabel('Download / Watch Video')
-                .setStyle(ButtonStyle.Link)
-                .setURL(cleanMediaStream)
+                .setCustomId(`dl_ig_${encodedUrlId}`)
+                .setLabel('📥 Download Video File Directly')
+                .setStyle(ButtonStyle.Primary) // Regular interaction execution button layout
         );
 
-        // Deliver interaction layout package instantly to the active text channel
         return await interaction.reply({ 
-            content: '🎬 **Your requested Instagram Reel is processed below:**',
-            components: [mediaButtonRow] 
+            content: '💬 **Click the button below to process and pull the video file directly into this chat chatroom:**',
+            components: [downloadButtonRow]
         });
     }
 });
