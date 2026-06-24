@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType, AttachmentBuilder } = require('discord.js');
 
 const app = report => express();
@@ -103,7 +104,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel via direct embed rendering!')
+        .setDescription('Download an Instagram Reel video using authenticated Python scrapers!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -300,62 +301,48 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === NATIVE OEMBED RENDER STREAM PIPELINE ===
+    // === AUTHENTICATED PYTHON YT-DLP EXTRACTION PIPELINE ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply();
 
-        try {
-            // Format URL directly into the official iframe embed document pipeline
-            let cleanedUrl = reelUrl.split('?')[0];
-            if (!cleanedUrl.endsWith('/')) cleanedUrl += '/';
-            const embedTargetUrl = `${cleanedUrl}embed/captioned/`;
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
 
-            const embedPage = await axios.get(embedTargetUrl, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                },
-                timeout: 10000
-            });
-
-            // Extract the direct media stream configurations loaded within the page structure
-            const videoMatch = embedPage.data.match(/"video_url":"([^"]+)"/) || 
-                               embedPage.data.match(/video_src_no_ratelimit["']:\s*["']([^"']+)["']/);
-
-            let directVideoUrl = videoMatch ? videoMatch[1] : null;
-
-            if (!directVideoUrl) {
-                // Fallback to checking the open graph configurations embedded on the rendered frame
-                const ogMatch = embedPage.data.match(/<meta\s+property=["']og:video["']\s+content=["']([^"']+)["']/i);
-                if (ogMatch) directVideoUrl = ogMatch[1];
-            }
-
-            if (!directVideoUrl) {
-                return await interaction.editReply({ 
-                    content: '❌ **Extraction Blocked!** Instagram rendered the frame safely but refused to output the raw CDN link to the server container.' 
-                });
-            }
-
-            // Clean unicode sequence markings out of the extracted URL link
-            const verifiedMediaUrl = directVideoUrl.replace(/\\u0026/g, '&');
-
-            const videoBuffer = await axios.get(verifiedMediaUrl, {
-                responseType: 'arraybuffer',
-                timeout: 15000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
-
-            const attachment = new AttachmentBuilder(Buffer.from(videoBuffer.data), { name: 'instagram_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel downloaded directly via embed frame query!**`, files: [attachment] });
-
-        } catch (err) {
-            console.error('Embed Stream Error:', err.message);
+        // Check if you remembered to upload your cookies file first
+        if (!fs.existsSync(cookiesPath)) {
             return await interaction.editReply({ 
-                content: '❌ **Pipeline Fault:** The embed routing tree timed out or returned an empty document context.' 
+                content: '❌ **Configuration Missing!** Put your exported `cookies.txt` into the bot\'s root directory first!' 
             });
         }
+
+        const outputFilename = `ig_${Date.now()}.mp4`;
+        const outputPath = path.join(__dirname, outputFilename);
+
+        // Shell execution command routing URL through yt-dlp with the Netscape session cookies
+        const cmd = `yt-dlp --cookies "${cookiesPath}" -f "mp4" -o "${outputPath}" "${reelUrl}"`;
+
+        exec(cmd, async (error, stdout, stderr) => {
+            if (error) {
+                console.error(`yt-dlp Error: ${error.message}`);
+                return await interaction.editReply({ content: '❌ **Extraction Failed!** Instagram rejected the active session cookies.' });
+            }
+
+            if (!fs.existsSync(outputPath)) {
+                return await interaction.editReply({ content: '❌ **File Processing Error:** The scraper finished but no output binary was generated.' });
+            }
+
+            try {
+                const attachment = new AttachmentBuilder(outputPath, { name: 'instagram_reel.mp4' });
+                await interaction.editReply({ content: `🎬 **Reel downloaded directly via Python layer!**`, files: [attachment] });
+            } catch (sendErr) {
+                console.error(sendErr);
+                await interaction.editReply({ content: '❌ **Upload Failure:** Video size exceeded Discord\'s upload payload limit.' });
+            } finally {
+                // Clear the temporary file off your host instance so disk doesn't fill up
+                fs.unlink(outputPath, (err) => { if (err) console.error('Failed cleaning up asset temp file:', err); });
+            }
+        });
     }
 });
 
