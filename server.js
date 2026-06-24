@@ -11,9 +11,9 @@ const {
     EmbedBuilder, 
     PermissionFlagsBits, 
     ChannelType,
-    ActionRowBuilder,    // Added for UI row container
-    ButtonBuilder,       // Added for UI interactive button
-    ButtonStyle          // Added for Button styling keys
+    ActionRowBuilder,    
+    ButtonBuilder,       
+    ButtonStyle          
 } = require('discord.js');
 
 const app = report => express();
@@ -312,28 +312,59 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === VXINSTAGRAM AUTOMATED REEL DOWNLOAD BUTTON ROUTER ===
+    // === VXINSTAGRAM REAL DYNAMIC SCRAPER DOWNLOAD SYSTEM ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Convert input string to target the direct g.vxinstagram.com asset bypass link
-        const directDownloadLink = reelUrl
-            .replace('instagram.com', 'g.vxinstagram.com')
+        // Let the user know the bot is cooking behind the scenes
+        await interaction.deferReply();
+
+        // Convert link to vxinstagram API json output endpoint
+        const jsonApiEndpoint = reelUrl
+            .replace('instagram.com', 'vxinstagram.com')
             .replace('www.', '');
 
-        // Build the link button component directly pointing to the media asset route
-        const mediaButtonRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setLabel('📥 Download Video File Directly')
-                .setStyle(ButtonStyle.Link)
-                .setURL(directDownloadLink)
-        );
+        try {
+            // Pull raw video structural metadata straight from vxinstagram's wrapper API
+            const apiMetadata = await axios.get(jsonApiEndpoint, {
+                headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' }
+            });
 
-        // Deliver layout instantly
-        return await interaction.reply({ 
-            content: '🎬 **Click below to instantly trigger the video asset file download:**',
-            components: [mediaButtonRow] 
-        });
+            // Extract the deep, long source asset link from the page context headers
+            const rawSourceMatch = apiMetadata.data.match(/<meta property="og:video" content="([^"]+)"/);
+            
+            if (!rawSourceMatch || !rawSourceMatch[1]) {
+                return await interaction.editReply({ 
+                    content: '❌ **Scraper Error:** API returned an invalid response block or the post is private.' 
+                });
+            }
+
+            // Unescape HTML entity strings out of the token payload safely
+            let finalDownloadLink = rawSourceMatch[1].replace(/&amp;/g, '&');
+
+            // Force browser to save file by ensuring downloader parameter flags are appended
+            if (!finalDownloadLink.includes('dl=1')) {
+                finalDownloadLink += finalDownloadLink.includes('?') ? '&dl=1' : '?dl=1';
+            }
+
+            const mediaButtonRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setLabel('📥 Auto-Download Video File')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(finalDownloadLink)
+            );
+
+            return await interaction.editReply({ 
+                content: '🎬 **Your download token has been generated successfully:**',
+                components: [mediaButtonRow] 
+            });
+
+        } catch (err) {
+            console.error('API Pull crashed:', err.message);
+            return await interaction.editReply({ 
+                content: '❌ **Pipeline Failure:** Video file could not be pulled from vxinstagram nodes.' 
+            });
+        }
     }
 });
 
