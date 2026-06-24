@@ -10,9 +10,13 @@ const {
     SlashCommandBuilder, 
     EmbedBuilder, 
     PermissionFlagsBits, 
-    ChannelType 
+    ChannelType,
+    ActionRowBuilder,    // Added for UI row container
+    ButtonBuilder,       // Added for UI interactive button
+    ButtonStyle          // Added for Button styling keys
 } = require('discord.js');
 
+const app = report => express();
 const appInstance = express();
 const PORT = process.env.PORT || 3000;
 
@@ -21,7 +25,7 @@ appInstance.get('/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('No code provided');
     try {
-        await axios.post('https://discord.com/api/v10/oauth2/token', new URLSearchParams({
+        const response = await axios.post('https://discord.com/api/v10/oauth2/token', new URLSearchParams({
             client_id: '1512761665719111892', 
             client_secret: process.env.DISCORD_SECRET, 
             grant_type: 'authorization_code',
@@ -111,7 +115,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Provides inline, seamless video playback for an Instagram Reel!')
+        .setDescription('Generate a clean video download button for an Instagram link!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -134,7 +138,10 @@ client.once('ready', async () => {
 
     async function updateServerStats() {
         const now = Date.now();
-        if (now - lastUpdated < COOLDOWN_MS) return;
+        if (now - lastUpdated < COOLDOWN_MS) {
+            console.log('Stats update blocked: Cooldown active, cooling down... ⏳');
+            return;
+        }
 
         try {
             for (const [guildId, guild] of client.guilds.cache) {
@@ -155,12 +162,14 @@ client.once('ready', async () => {
                 }
             }
             lastUpdated = Date.now();
+            console.log('Server stats checked and safely updated inside the 6m window!');
         } catch (err) {
             console.error('Stats loop hit a wall:', err);
         }
     }
 
     updateServerStats();
+
     client.on('guildMemberAdd', () => updateServerStats());
     client.on('guildMemberRemove', () => updateServerStats());
 });
@@ -303,18 +312,27 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === NATIVE EMBED REWRITE ENGINE ===
+    // === SLEEK NATIVE DOWNLOAD BUTTON LINK ROUTER ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Convert to ddinstagram to bypass file limits entirely
-        const nativeEmbedUrl = reelUrl
-            .replace('instagram.com', 'ddinstagram.com')
+        // Convert input string to the proxy service configuration behind the scenes
+        const cleanMediaStream = reelUrl
+            .replace('instagram.com', 'vxinstagram.com')
             .replace('www.', '');
 
-        // Drop directly to chat—Discord strips the text string and inserts the pure video block
+        // Build the physical link interface component block
+        const mediaButtonRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('Download / Watch Video')
+                .setStyle(ButtonStyle.Link)
+                .setURL(cleanMediaStream)
+        );
+
+        // Deliver interaction layout package instantly to the active text channel
         return await interaction.reply({ 
-            content: nativeEmbedUrl 
+            content: '🎬 **Your requested Instagram Reel is processed below:**',
+            components: [mediaButtonRow] 
         });
     }
 });
