@@ -10,8 +10,7 @@ const {
     SlashCommandBuilder, 
     EmbedBuilder, 
     PermissionFlagsBits, 
-    ChannelType,
-    AttachmentBuilder    
+    ChannelType 
 } = require('discord.js');
 
 const appInstance = express();
@@ -112,7 +111,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Downloads and uploads an Instagram Reel file directly into chat!')
+        .setDescription('Provides inline, seamless video playback for an Instagram Reel!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -135,9 +134,7 @@ client.once('ready', async () => {
 
     async function updateServerStats() {
         const now = Date.now();
-        if (now - lastUpdated < COOLDOWN_MS) {
-            return;
-        }
+        if (now - lastUpdated < COOLDOWN_MS) return;
 
         try {
             for (const [guildId, guild] of client.guilds.cache) {
@@ -306,44 +303,19 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === DIRECT IN-LINE VIDEO UPLOAD PIPE ===
+    // === NATIVE EMBED REWRITE ENGINE ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Defer interaction with standard visible fallback loader frame
-        await interaction.deferReply();
+        // Convert to ddinstagram to bypass file limits entirely
+        const nativeEmbedUrl = reelUrl
+            .replace('instagram.com', 'ddinstagram.com')
+            .replace('www.', '');
 
-        try {
-            // Swap to a specialized backend proxy API that parses the binary files
-            const proxyTarget = `https://api.vxtwitter.com/CombinedAPI/instagram?url=${encodeURIComponent(reelUrl)}`;
-
-            const apiResponse = await axios.get(proxyTarget, { timeout: 10000 });
-            
-            // Extract the direct raw resource mp4 url string safely
-            const directVideoUrl = apiResponse.data?.urls?.[0] || apiResponse.data?.video_url;
-
-            if (!directVideoUrl) {
-                return await interaction.editReply({ content: '❌ **Extraction Failed:** The download proxy was unable to parse this specific link structure.' });
-            }
-
-            // Pull video source straight into memory array buffer streams
-            const videoStream = await axios.get(directVideoUrl, { responseType: 'arraybuffer', timeout: 12000 });
-            const videoBuffer = Buffer.from(videoStream.data);
-
-            const fileAttachment = new AttachmentBuilder(videoBuffer, { name: 'instagram_reel.mp4' });
-
-            // Post file directly right into chat stream without buttons or link text
-            return await interaction.editReply({ 
-                content: '🎬 **Reel downloaded directly into Discord:**', 
-                files: [fileAttachment] 
-            });
-
-        } catch (err) {
-            console.error('Direct Stream Download Fault:', err.message);
-            return await interaction.editReply({ 
-                content: '❌ **Pipeline Failure:** Video file could not be pulled, or it exceeds Discord\'s native size attachment limits.' 
-            });
-        }
+        // Drop directly to chat—Discord strips the text string and inserts the pure video block
+        return await interaction.reply({ 
+            content: nativeEmbedUrl 
+        });
     }
 });
 
