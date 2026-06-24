@@ -2,7 +2,19 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { 
+    Client, 
+    GatewayIntentBits, 
+    REST, 
+    Routes, 
+    SlashCommandBuilder, 
+    EmbedBuilder, 
+    PermissionFlagsBits, 
+    ChannelType,
+    ActionRowBuilder,    // Added for UI row container
+    ButtonBuilder,       // Added for UI interactive button
+    ButtonStyle          // Added for Button styling keys
+} = require('discord.js');
 
 const app = report => express();
 const appInstance = express();
@@ -103,7 +115,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Generate a seamless video playback link for an Instagram link!')
+        .setDescription('Generate a clean video download button for an Instagram link!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -300,18 +312,27 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === UN-BANNABLE RE-WRITE STREAM ENGINE ===
+    // === SLEEK NATIVE DOWNLOAD BUTTON LINK ROUTER ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Instant rewrite to target the open media layout proxy directly
-        const rewrittenUrl = reelUrl
+        // Convert input string to the proxy service configuration behind the scenes
+        const cleanMediaStream = reelUrl
             .replace('instagram.com', 'vxinstagram.com')
             .replace('www.', '');
 
-        // Beam the rewritten string directly back to chat—Discord renders the video instantly!
+        // Build the physical link interface component block
+        const mediaButtonRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('Download / Watch Video')
+                .setStyle(ButtonStyle.Link)
+                .setURL(cleanMediaStream)
+        );
+
+        // Deliver interaction layout package instantly to the active text channel
         return await interaction.reply({ 
-            content: `🎬 **Reel Native Embed Stream:**\n${rewrittenUrl}` 
+            content: '🎬 **Your requested Instagram Reel is processed below:**',
+            components: [mediaButtonRow] 
         });
     }
 });
