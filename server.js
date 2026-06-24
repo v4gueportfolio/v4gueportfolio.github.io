@@ -349,13 +349,13 @@ client.on('interactionCreate', async interaction => {
 
             const mediaButtonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
-                    .setLabel('📥 Auto-Download Video File')
+                    .setLabel('📥 Download Video File')
                     .setStyle(ButtonStyle.Link)
                     .setURL(finalDownloadLink)
             );
 
             return await interaction.editReply({ 
-                content: '🎬 **Your download token has been generated successfully:**',
+                content: '🎬 **Your instagram reel has been processed successfully:**',
                 components: [mediaButtonRow] 
             });
 
