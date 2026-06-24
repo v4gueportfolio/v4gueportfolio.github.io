@@ -2,8 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const cheerio = require('cheerio'); // Added for HTML scraping filtration
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 
 const app = report => express();
 const appInstance = express();
@@ -104,7 +103,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ig')
-        .setDescription('Download an Instagram Reel via indirect server scraping!')
+        .setDescription('Generate a seamless video playback link for an Instagram link!')
         .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
 ].map(command => command.toJSON());
 
@@ -301,70 +300,19 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === INDIRECT SCANNER EXTRACTION PIPELINE via savevid.net ===
+    // === UN-BANNABLE RE-WRITE STREAM ENGINE ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        await interaction.deferReply();
+        // Instant rewrite to target the open media layout proxy directly
+        const rewrittenUrl = reelUrl
+            .replace('instagram.com', 'vxinstagram.com')
+            .replace('www.', '');
 
-        // YOUR VERBATIM CUSTOM HEADERS FROM THE FANTOX STRUCTURE BLOCK
-        const headers = {
-            "Accept": "*/*",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Origin": "https://savevid.net",
-            "Priority": "u=1, i",
-            "Referer": "https://savevid.net/",
-            "Sec-CH-UA": '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
-            "Sec-CH-UA-Mobile": "?0",
-            "Sec-CH-UA-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-        };
-
-        try {
-            // Posting directly into the actual savevid search API routing tree
-            const response = await axios.post(
-                "https://savevid.net/api/ajaxSearch",
-                new URLSearchParams({
-                    q: reelUrl,
-                    t: "media",
-                    lang: "en"
-                }).toString(),
-                { headers }
-            );
-
-            // Handle structure block errors if the API payload is blank
-            if (!response.data || !response.data.data) {
-                return await interaction.editReply({ content: '❌ **Scraper Error:** API returned an invalid response block.' });
-            }
-
-            // Using Cheerio to load the dynamic HTML payload string returned inside response.data.data
-            const $ = cheerio.load(response.data.data);
-            const directMediaUrl = $('.download-items .abutton').attr('href');
-
-            if (!directMediaUrl) {
-                return await interaction.editReply({ content: '❌ **Extraction Blocked:** Could not parse raw CDN target link from cheerio nodes.' });
-            }
-
-            // Pull video file directly into a buffer stream
-            const videoBuffer = await axios.get(directMediaUrl, {
-                responseType: 'arraybuffer',
-                timeout: 15000
-            });
-
-            const fileAttachment = new AttachmentBuilder(Buffer.from(videoBuffer.data), { name: 'scraped_reel.mp4' });
-            return await interaction.editReply({ content: `🎬 **Reel downloaded successfully via indirect scraper mapping!**`, files: [fileAttachment] });
-
-        } catch (err) {
-            console.error('Indirect Scrape Fault:', err.message);
-            return await interaction.editReply({ 
-                content: '❌ **Pipeline Fault:** The API endpoint timed out or blocked your hosting server IP container.' 
-            });
-        }
+        // Beam the rewritten string directly back to chat—Discord renders the video instantly!
+        return await interaction.reply({ 
+            content: `🎬 **Reel Native Embed Stream:**\n${rewrittenUrl}` 
+        });
     }
 });
 
