@@ -312,26 +312,26 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === SLEEK NATIVE DOWNLOAD BUTTON LINK ROUTER ===
+    // === VXINSTAGRAM AUTOMATED REEL DOWNLOAD BUTTON ROUTER ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Convert input string to the proxy service configuration behind the scenes
-        const cleanMediaStream = reelUrl
-            .replace('instagram.com', 'vxinstagram.com')
+        // Convert input string to target the direct g.vxinstagram.com asset bypass link
+        const directDownloadLink = reelUrl
+            .replace('instagram.com', 'g.vxinstagram.com')
             .replace('www.', '');
 
-        // Build the physical link interface component block
+        // Build the link button component directly pointing to the media asset route
         const mediaButtonRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setLabel('Download / Watch Video')
+                .setLabel('📥 Download Video File Directly')
                 .setStyle(ButtonStyle.Link)
-                .setURL(cleanMediaStream)
+                .setURL(directDownloadLink)
         );
 
-        // Deliver interaction layout package instantly to the active text channel
+        // Deliver layout instantly
         return await interaction.reply({ 
-            content: '🎬 **Your requested Instagram Reel is processed below:**',
+            content: '🎬 **Click below to instantly trigger the video asset file download:**',
             components: [mediaButtonRow] 
         });
     }
