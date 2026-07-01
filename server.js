@@ -244,6 +244,20 @@ client.on('interactionCreate', async interaction => {
         const robux = interaction.options.getNumber('robux');
         const desc = interaction.options.getString('desc') || 'No description provided.';
 
+        // === FIXED ROLE VERIFICATION GATEKEEPER ===
+        const currentGuildSettings = settings[guildId];
+        const globalRequiredRoleId = currentGuildSettings?.roleId;
+        
+        if (globalRequiredRoleId) {
+            const currentMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+            if (!currentMember || !currentMember.roles.cache.has(globalRequiredRoleId)) {
+                return await interaction.reply({ 
+                    content: `❌ **Access Denied!** You do not have the required <@&${globalRequiredRoleId}> role to host events! 🥀`, 
+                    ephemeral: true 
+                });
+            }
+        }
+
         if (!link.startsWith('http://') && !link.startsWith('https://')) {
             link = 'https://' + link;
         }
