@@ -330,55 +330,57 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        // Let the user know the bot is cooking behind the scenes
         await interaction.deferReply();
 
-        // Convert link to vxinstagram API json output endpoint
         const jsonApiEndpoint = reelUrl
             .replace('instagram.com', 'vxinstagram.com')
             .replace('www.', '');
 
-        try {
-            // Pull raw video structural metadata straight from vxinstagram's wrapper API
-            const apiMetadata = await axios.get(jsonApiEndpoint, {
-                headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' }
-            });
+        let finalDownloadLink = null;
+        const totalAttempts = 3;
 
-            // Extract the deep, long source asset link from the page context headers
-            const rawSourceMatch = apiMetadata.data.match(/<meta property="og:video" content="([^"]+)"/);
-            
-            if (!rawSourceMatch || !rawSourceMatch[1]) {
-                return await interaction.editReply({ 
-                    content: '❌ **Scraper Error:** API returned an invalid response block or the post is private.' 
+        // Retry loop system
+        for (let i = 0; i < totalAttempts; i++) {
+            try {
+                const apiMetadata = await axios.get(jsonApiEndpoint, {
+                    headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' }
                 });
+
+                const rawSourceMatch = apiMetadata.data.match(/<meta property="og:video" content="([^"]+)"/);
+                
+                if (rawSourceMatch && rawSourceMatch[1]) {
+                    finalDownloadLink = rawSourceMatch[1].replace(/&amp;/g, '&');
+                    break; // Successfully pulled! Break loop.
+                }
+            } catch (err) {
+                console.error(`Scraper attempt ${i + 1} failed:`, err.message);
+                if (i < totalAttempts - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1200)); // Short delay before retry
+                }
             }
+        }
 
-            // Unescape HTML entity strings out of the token payload safely
-            let finalDownloadLink = rawSourceMatch[1].replace(/&amp;/g, '&');
-
-            // Force browser to save file by ensuring downloader parameter flags are appended
-            if (!finalDownloadLink.includes('dl=1')) {
-                finalDownloadLink += finalDownloadLink.includes('?') ? '&dl=1' : '?dl=1';
-            }
-
-            const mediaButtonRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setLabel('📥 Download Video File')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL(finalDownloadLink)
-            );
-
+        if (!finalDownloadLink) {
             return await interaction.editReply({ 
-                content: '🎬 **Your instagram reel has been processed successfully:**',
-                components: [mediaButtonRow] 
-            });
-
-        } catch (err) {
-            console.error('API Pull crashed:', err.message);
-            return await interaction.editReply({ 
-                content: '❌ **Pipeline Failure:** Video file could not be pulled from vxinstagram nodes.' 
+                content: '❌ **Pipeline Failure:** Video file could not be pulled from vxinstagram nodes after 3 tries.' 
             });
         }
+
+        if (!finalDownloadLink.includes('dl=1')) {
+            finalDownloadLink += finalDownloadLink.includes('?') ? '&dl=1' : '?dl=1';
+        }
+
+        const mediaButtonRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('📥 Download Video File')
+                .setStyle(ButtonStyle.Link)
+                .setURL(finalDownloadLink)
+        );
+
+        return await interaction.editReply({ 
+            content: '🎬 **Your instagram reel has been processed successfully:**',
+            components: [mediaButtonRow] 
+        });
     }
 });
 
