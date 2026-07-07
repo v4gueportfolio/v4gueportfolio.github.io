@@ -116,7 +116,11 @@ const commands = [
     new SlashCommandBuilder()
         .setName('ig')
         .setDescription('Generate a clean video download button for an Instagram link!')
-        .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true))
+        .addStringOption(option => option.setName('link').setDescription('Paste the Instagram reel URL').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('ping')
+        .setDescription('Check the bot operational latency!')
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -178,6 +182,14 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     const settings = loadSettings();
     const guildId = interaction.guildId;
+
+    if (interaction.commandName === 'ping') {
+        const latency = Date.now() - interaction.createdTimestamp;
+        return await interaction.reply({ 
+            content: `**🏓 Pong!**\n*Latency: ${latency} ms*`, 
+            ephemeral: true 
+        });
+    }
 
     if (interaction.commandName === 'eventchannel') {
         const targetChannel = interaction.options.getChannel('target');
