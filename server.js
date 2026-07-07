@@ -326,20 +326,24 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
-    // === VXINSTAGRAM REAL DYNAMIC SCRAPER DOWNLOAD SYSTEM ===
+    // === VXINSTAGRAM DYNAMIC DOWNLOAD SYSTEM ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
         await interaction.deferReply();
 
-        const jsonApiEndpoint = reelUrl
+        // 1. Strip query strings and clean tracking trash
+        const cleanUrl = reelUrl.split('?')[0];
+
+        // 2. Generate vxinstagram url target
+        const jsonApiEndpoint = cleanUrl
             .replace('instagram.com', 'vxinstagram.com')
             .replace('www.', '');
 
         let finalDownloadLink = null;
         const totalAttempts = 3;
 
-        // Retry loop system
+        // Retry scraping loop
         for (let i = 0; i < totalAttempts; i++) {
             try {
                 const apiMetadata = await axios.get(jsonApiEndpoint, {
@@ -350,12 +354,12 @@ client.on('interactionCreate', async interaction => {
                 
                 if (rawSourceMatch && rawSourceMatch[1]) {
                     finalDownloadLink = rawSourceMatch[1].replace(/&amp;/g, '&');
-                    break; // Successfully pulled! Break loop.
+                    break; 
                 }
             } catch (err) {
                 console.error(`Scraper attempt ${i + 1} failed:`, err.message);
                 if (i < totalAttempts - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1200)); // Short delay before retry
+                    await new Promise(resolve => setTimeout(resolve, 1200));
                 }
             }
         }
