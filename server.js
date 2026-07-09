@@ -342,12 +342,13 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
         
-        await interaction.deferReply();
+        // 1. MUST defer with ephemeral set to true so the final edit stays local
+        await interaction.deferReply({ ephemeral: true });
 
-        // 1. Strip query strings and clean tracking trash
+        // 2. Strip query strings and clean tracking trash
         const cleanUrl = reelUrl.split('?')[0];
 
-        // 2. Generate vxinstagram url target
+        // 3. Generate vxinstagram url target
         const jsonApiEndpoint = cleanUrl
             .replace('instagram.com', 'vxinstagram.com')
             .replace('www.', '');
@@ -378,7 +379,8 @@ client.on('interactionCreate', async interaction => {
 
         if (!finalDownloadLink) {
             return await interaction.editReply({ 
-                content: '❌ **Pipeline Failure:** Video file could not be pulled from vxinstagram nodes after 3 tries.' 
+                content: '❌ **Pipeline Failure:** Video file could not be pulled from vxinstagram nodes after 3 tries.',
+                ephemeral: true
             });
         }
 
@@ -393,9 +395,11 @@ client.on('interactionCreate', async interaction => {
                 .setURL(finalDownloadLink)
         );
 
+        // 4. Send response safely locked down to the user's side
         return await interaction.editReply({ 
             content: '🎬 **Your instagram reel has been processed successfully:**',
-            components: [mediaButtonRow] 
+            components: [mediaButtonRow],
+            ephemeral: true 
         });
     }
 });
