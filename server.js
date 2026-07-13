@@ -13,7 +13,8 @@ const {
     ChannelType,
     ActionRowBuilder,    
     ButtonBuilder,       
-    ButtonStyle          
+    ButtonStyle,
+    AuditLogEvent          
 } = require('discord.js');
 
 const app = report => express();
@@ -44,13 +45,14 @@ appInstance.get('/callback', async (req, res) => {
 appInstance.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === BOT ENGINE WITH FIXED COMMAND BUILDER ===
+// === BOT ENGINE WITH FIXED AUDIT INTENT ===
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildPresences
+        GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.GuildModeration
     ]
 }); 
 
@@ -120,7 +122,18 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ping')
-        .setDescription('Check the bot operational latency!')
+        .setDescription('Check the bot operational latency!'),
+
+    // === NEW AUDIT RECOVERY SYSTEM COMMANDS ===
+    new SlashCommandBuilder()
+        .setName('viewchangemap')
+        .setDescription('Generates a clear visual text map of all channel name changes (Original -> Flipped -> Current).')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('repairnames')
+        .setDescription('Scrapes deep historical logs to completely restore channels back to their true original names.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -189,6 +202,121 @@ client.on('interactionCreate', async interaction => {
             content: `**🏓 Pong!**\n*Latency: ${latency} ms*`, 
             ephemeral: true 
         });
+    }
+
+    // === 1. VIEW CHANGE MAP PIPELINE ===
+    if (interaction.commandName === 'viewchangemap') {
+        await interaction.deferReply({ ephemeral: true });
+        try {
+            const auditLogs = await interaction.guild.fetchAuditLogs({ limit: 100, type: AuditLogEvent.ChannelUpdate });
+            const historyMap = new Map();
+
+            // Read oldest logs first to build a chronological timeline of modifications
+            const sortedEntries = Array.from(auditLogs.entries.values()).reverse();
+
+            for (const entry of sortedEntries) {
+                if (!entry.targetId) continue;
+                const nameChange = entry.changes.find(c => c.key === 'name');
+                if (nameChange) {
+                    if (!historyMap.has(entry.targetId)) {
+                        historyMap.set(entry.targetId, []);
+                    }
+                    const list = historyMap.get(entry.targetId);
+                    if (list.length === 0 && nameChange.old) {
+                        list.push(nameChange.old); // The absolute original name
+                    }
+                    if (nameChange.new) {
+                        list.push(nameChange.new); // Flipped names step-by-step
+                    }
+                }
+            }
+
+            if (historyMap.size === 0) {
+                return await interaction.editReply({ content: '❌ **Clean Database:** No double-flip channel history found.' });
+            }
+
+            let mapOutputText = '📋 **Channel Rename Tracking Maps:**\n\n';
+            for (const [channelId, namesList] of historyMap.entries()) {
+                const currentChannel = interaction.guild.channels.cache.get(channelId);
+                const structureLabel = currentChannel ? `<#${channelId}>` : `Deleted Channel (${channelId})`;
+                // Filter down sequential duplicates to look clean
+                const uniqueSteps = namesList.filter((item, pos, self) => !pos || item !== self[pos - 1]);
+                mapOutputText += `${structureLabel}:\n\`${uniqueSteps.join(' ➔ ')}\`\n\n`;
+            }
+
+            if (mapOutputText.length > 2000) {
+                mapOutputText = mapOutputText.substring(0, 1950) + '\n*(Truncated due to Discord character limits)*';
+            }
+
+            return await interaction.editReply({ content: mapOutputText });
+        } catch (err) {
+            console.error(err);
+            return await interaction.editReply({ content: `❌ **Error Mapping Data Node:** \`${err.message}\`` });
+        }
+    }
+
+    // === 2. DYNAMIC DEEP REPAIR PIPELINE ===
+    if (interaction.commandName === 'repairnames') {
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+            const auditLogs = await interaction.guild.fetchAuditLogs({ limit: 100, type: AuditLogEvent.ChannelUpdate });
+            const trueOriginalMap = new Map();
+
+            // Oldest logs first means the FIRST old name logged is the TRUE original name
+            const sortedEntries = Array.from(auditLogs.entries.values()).reverse();
+            
+            for (const entry of sortedEntries) {
+                if (!entry.targetId) continue;
+                const nameChange = entry.changes.find(c => c.key === 'name');
+                if (nameChange && nameChange.old) {
+                    // Lock down only the first entry found (true original before double-flips)
+                    if (!trueOriginalMap.has(entry.targetId)) {
+                        trueOriginalMap.set(entry.targetId, nameChange.old);
+                    }
+                }
+            }
+
+            if (trueOriginalMap.size === 0) {
+                return await interaction.editReply({
+                    content: '❌ **Operation Cancelled:** Deep scan discovered zero historical name logs.'
+                });
+            }
+
+            await interaction.editReply({
+                content: `⚙️ **Deep Recovery Sequence Initiated:** Found **${trueOriginalMap.size}** channels. Restoring true original names with a strict 20-second spacing timer...`
+            });
+
+            // Safe execution pipeline worker
+            (async () => {
+                const elements = Array.from(trueOriginalMap.entries());
+                for (let i = 0; i < elements.length; i++) {
+                    const [channelId, trueOriginalName] = elements[i];
+                    try {
+                        const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+                        if (channel && channel.name !== trueOriginalName) {
+                            await channel.setName(trueOriginalName);
+                            console.log(`[DEEP REPAIR] Restored node ${channelId} back to: ${trueOriginalName}`);
+                        }
+                    } catch (error) {
+                        console.error(`[REPAIR PACKET EXCEPTION] Target ${channelId}:`, error.message);
+                    }
+
+                    // Strict instruction constraint: 20-second timer buffer
+                    if (i < elements.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 20000));
+                    }
+                }
+                console.log('[DEEP REPAIR COMPLETE] System recovery pipeline fully finalized.');
+            })();
+
+        } catch (err) {
+            console.error(err);
+            return await interaction.editReply({
+                content: `❌ **Deep Scan Failure:** Internal error loading log arrays: \`${err.message}\``
+            });
+        }
+        return;
     }
 
     if (interaction.commandName === 'eventchannel') {
