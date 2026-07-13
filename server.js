@@ -50,7 +50,8 @@ const client = new Client({
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildPresences
+        GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.GuildScheduledEvents
     ]
 }); 
 
@@ -125,17 +126,17 @@ const commands = [
     // === NEW SERVER MANAGEMENT COMMANDS ===
     new SlashCommandBuilder()
         .setName('saveserverstate')
-        .setDescription('Save all text channel configurations for this server.')
+        .setDescription('Save all current channel, category, and scheduled event names.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
         .setName('listsaves')
-        .setDescription('Display available server channel backups.')
+        .setDescription('Display available server structure name backups.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
         .setName('loadserverstate')
-        .setDescription('Restore a previously saved text channel layout layout configuration.')
+        .setDescription('Restore names for existing channels, categories, and scheduled events.')
         .addStringOption(option => option.setName('save_id').setDescription('Provide the targeted unique Backup ID string').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
@@ -416,10 +417,23 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'saveserverstate') {
         await interaction.deferReply({ ephemeral: true });
         
+        // Fetch channels and active scheduled events
         const channels = await interaction.guild.channels.fetch();
-        const textChannelNames = channels
-            .filter(ch => ch && ch.type === ChannelType.GuildText)
-            .map(ch => ch.name);
+        const activeEvents = await interaction.guild.scheduledEvents.fetch();
+
+        const channelData = {};
+        channels.forEach(ch => {
+            if (ch) {
+                channelData[ch.id] = { name: ch.name, type: ch.type };
+            }
+        });
+
+        const eventData = {};
+        activeEvents.forEach(ev => {
+            if (ev) {
+                eventData[ev.id] = { name: ev.name };
+            }
+        });
 
         if (!settings[guildId]) settings[guildId] = {};
         if (!settings[guildId].saves) settings[guildId].saves = {};
@@ -427,12 +441,13 @@ client.on('interactionCreate', async interaction => {
         const saveId = `bkup-${Date.now()}`;
         settings[guildId].saves[saveId] = {
             timestamp: new Date().toISOString(),
-            channels: textChannelNames
+            channels: channelData,
+            events: eventData
         };
 
         saveSettings(settings);
         return await interaction.editReply({
-            content: `💾 **State Logged!** Backup completely stored under ID: \`${saveId}\`. Processed **${textChannelNames.length}** text channels.`
+            content: `💾 **State Logged!** Backup stored under ID: \`${saveId}\`. Documented **${Object.keys(channelData).length}** channels/categories and **${Object.keys(eventData).length}** server events.`
         });
     }
 
@@ -445,14 +460,17 @@ client.on('interactionCreate', async interaction => {
 
         const listEmbed = new EmbedBuilder()
             .setColor(0x5865F2)
-            .setTitle('📦 Available Text Channel Backups')
+            .setTitle('📦 Available Server Name Backups')
             .setTimestamp();
 
         Object.keys(serverSaves).forEach(id => {
             const data = serverSaves[id];
+            const chCount = Object.keys(data.channels || {}).length;
+            const evCount = Object.keys(data.events || {}).length;
+            
             listEmbed.addFields({
                 name: `ID: ${id}`,
-                value: `📅 Created: \`${data.timestamp}\`\n💬 Channels Saved: **${data.channels.length}**`,
+                value: `📅 Created: \`${data.timestamp}\`\n💬 Elements Tracked: **${chCount}** channels/categories | **${evCount}** Events`,
                 inline: false
             });
         });
@@ -471,32 +489,42 @@ client.on('interactionCreate', async interaction => {
         }
 
         try {
+            // Fetch fresh real-time states
             const currentChannels = await interaction.guild.channels.fetch();
-            const existingTextChannels = currentChannels.filter(ch => ch && ch.type === ChannelType.GuildText);
+            const currentEvents = await interaction.guild.scheduledEvents.fetch();
             
-            let restoredCount = 0;
-            let creationCount = 0;
+            let channelsRestored = 0;
+            let eventsRestored = 0;
 
-            for (const savedName of activeSave.channels) {
-                const match = existingTextChannels.find(ch => ch.name === savedName);
-                if (match) {
-                    restoredCount++;
-                } else {
-                    // Recreate structural node missing from workspace active list
-                    await interaction.guild.channels.create({
-                        name: savedName,
-                        type: ChannelType.GuildText
-                    });
-                    creationCount++;
+            // 1. Restore names for existing Categories, Text, and Voice channels matching saved IDs
+            if (activeSave.channels) {
+                for (const [id, savedConfig] of Object.entries(activeSave.channels)) {
+                    const liveChannel = currentChannels.get(id);
+                    // Only update if it exists and the name shifted from the original state
+                    if (liveChannel && liveChannel.name !== savedConfig.name) {
+                        await liveChannel.setName(savedConfig.name).catch(() => null);
+                        channelsRestored++;
+                    }
+                }
+            }
+
+            // 2. Restore names for active Scheduled Events matching saved IDs
+            if (activeSave.events) {
+                for (const [id, savedConfig] of Object.entries(activeSave.events)) {
+                    const liveEvent = currentEvents.get(id);
+                    if (liveEvent && liveEvent.name !== savedConfig.name) {
+                        await liveEvent.setName(savedConfig.name).catch(() => null);
+                        eventsRestored++;
+                    }
                 }
             }
 
             return await interaction.editReply({
-                content: `⚡ **Deployment Complete!** Restored state parameters: Checked **${restoredCount}** matching structures. Automatically generated **${creationCount}** missing text channels.`
+                content: `⚡ **Name Restoration Complete!** Reset parameters for **${channelsRestored}** channels/categories and **${eventsRestored}** scheduled events matching this backup index.`
             });
         } catch (err) {
             console.error(err);
-            return await interaction.editReply({ content: '❌ **Fatal Exception:** Access structural failures encountered during target matrix initialization.' });
+            return await interaction.editReply({ content: '❌ **Fatal Exception:** Access failures encountered during name correction deployment loop.' });
         }
     }
 });
