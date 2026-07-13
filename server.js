@@ -252,7 +252,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // === 2. DYNAMIC DEEP REPAIR PIPELINE WITH 5-SECOND TIMER ===
+    // === 2. DYNAMIC DEEP REPAIR PIPELINE WITH FORCED BACK-RESTORE ===
     if (interaction.commandName === 'repairnames') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -260,6 +260,7 @@ client.on('interactionCreate', async interaction => {
             const auditLogs = await interaction.guild.fetchAuditLogs({ limit: 100, type: AuditLogEvent.ChannelUpdate });
             const trueOriginalMap = new Map();
 
+            // Loop in reverse chronological order to find the earliest 'old' value
             const sortedEntries = Array.from(auditLogs.entries.values()).reverse();
             
             for (const entry of sortedEntries) {
@@ -288,7 +289,8 @@ client.on('interactionCreate', async interaction => {
                     const [channelId, trueOriginalName] = elements[i];
                     try {
                         const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
-                        if (channel && channel.name !== trueOriginalName) {
+                        if (channel) {
+                            // Force mutation directly to eliminate condition mismatch checks
                             await channel.setName(trueOriginalName);
                             console.log(`[DEEP REPAIR] Restored node ${channelId} back to: ${trueOriginalName}`);
                         }
@@ -296,7 +298,6 @@ client.on('interactionCreate', async interaction => {
                         console.error(`[REPAIR PACKET EXCEPTION] Target ${channelId}:`, error.message);
                     }
 
-                    // Strict instruction constraint: Lowered to 5-second timer buffer
                     if (i < elements.length - 1) {
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
