@@ -120,7 +120,24 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('ping')
-        .setDescription('Check the bot operational latency!')
+        .setDescription('Check the bot operational latency!'),
+
+    // === NEW SERVER MANAGEMENT COMMANDS ===
+    new SlashCommandBuilder()
+        .setName('saveserverstate')
+        .setDescription('Save all text channel configurations for this server.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('listsaves')
+        .setDescription('Display available server channel backups.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('loadserverstate')
+        .setDescription('Restore a previously saved text channel layout layout configuration.')
+        .addStringOption(option => option.setName('save_id').setDescription('Provide the targeted unique Backup ID string').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -393,6 +410,94 @@ client.on('interactionCreate', async interaction => {
             components: [mediaButtonRow],
             ephemeral: true 
         });
+    }
+
+    // === NEW LOGIC: SAVE SERVER STATE ===
+    if (interaction.commandName === 'saveserverstate') {
+        await interaction.deferReply({ ephemeral: true });
+        
+        const channels = await interaction.guild.channels.fetch();
+        const textChannelNames = channels
+            .filter(ch => ch && ch.type === ChannelType.GuildText)
+            .map(ch => ch.name);
+
+        if (!settings[guildId]) settings[guildId] = {};
+        if (!settings[guildId].saves) settings[guildId].saves = {};
+
+        const saveId = `bkup-${Date.now()}`;
+        settings[guildId].saves[saveId] = {
+            timestamp: new Date().toISOString(),
+            channels: textChannelNames
+        };
+
+        saveSettings(settings);
+        return await interaction.editReply({
+            content: `💾 **State Logged!** Backup completely stored under ID: \`${saveId}\`. Processed **${textChannelNames.length}** text channels.`
+        });
+    }
+
+    // === NEW LOGIC: LIST SAVES ===
+    if (interaction.commandName === 'listsaves') {
+        const serverSaves = settings[guildId]?.saves;
+        if (!serverSaves || Object.keys(serverSaves).length === 0) {
+            return await interaction.reply({ content: '📂 **No entries found.** Run \`/saveserverstate\` first to establish a recovery point.', ephemeral: true });
+        }
+
+        const listEmbed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('📦 Available Text Channel Backups')
+            .setTimestamp();
+
+        Object.keys(serverSaves).forEach(id => {
+            const data = serverSaves[id];
+            listEmbed.addFields({
+                name: `ID: ${id}`,
+                value: `📅 Created: \`${data.timestamp}\`\n💬 Channels Saved: **${data.channels.length}**`,
+                inline: false
+            });
+        });
+
+        return await interaction.reply({ embeds: [listEmbed], ephemeral: true });
+    }
+
+    // === NEW LOGIC: LOAD SERVER STATE ===
+    if (interaction.commandName === 'loadserverstate') {
+        await interaction.deferReply({ ephemeral: true });
+        const targetSaveId = interaction.options.getString('save_id');
+        const activeSave = settings[guildId]?.saves?.[targetSaveId];
+
+        if (!activeSave) {
+            return await interaction.editReply({ content: `❌ **Retrieval Error:** The backup identity \`${targetSaveId}\` does not exist inside our records.` });
+        }
+
+        try {
+            const currentChannels = await interaction.guild.channels.fetch();
+            const existingTextChannels = currentChannels.filter(ch => ch && ch.type === ChannelType.GuildText);
+            
+            let restoredCount = 0;
+            let creationCount = 0;
+
+            for (const savedName of activeSave.channels) {
+                const match = existingTextChannels.find(ch => ch.name === savedName);
+                if (match) {
+                    restoredCount++;
+                } else {
+                    // Recreate structural node missing from workspace active list
+                    await interaction.guild.channels.create({
+                        name: savedName,
+                        type: ChannelType.GuildText
+                    });
+                    creationCount++;
+                }
+            }
+
+            return await interaction.editReply({
+                content: `⚡ **Deployment Complete!** Restored state parameters: Checked **${restoredCount}** matching structures. Automatically generated **${creationCount}** missing text channels.`
+            });
+        } catch (err) {
+            console.error(err);
+            return await interaction.editReply({ content: '❌ **Fatal Exception:** Access structural failures encountered during target matrix initialization.' });
+        }
     }
 });
 
