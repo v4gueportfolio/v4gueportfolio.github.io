@@ -252,7 +252,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // === 2. DYNAMIC DEEP REPAIR PIPELINE WITH FORCED BACK-RESTORE ===
+    // === 2. INLINE DEEP REPAIR PIPELINE (AWAITED WITH 1s RATE LIMIT ENGINE BUFFER) ===
     if (interaction.commandName === 'repairnames') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -260,7 +260,7 @@ client.on('interactionCreate', async interaction => {
             const auditLogs = await interaction.guild.fetchAuditLogs({ limit: 100, type: AuditLogEvent.ChannelUpdate });
             const trueOriginalMap = new Map();
 
-            // Loop in reverse chronological order to find the earliest 'old' value
+            // Scrape audit logs backward to capture the absolute earliest original identifier string
             const sortedEntries = Array.from(auditLogs.entries.values()).reverse();
             
             for (const entry of sortedEntries) {
@@ -279,31 +279,32 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
-            await interaction.editReply({
-                content: `⚙️ **Deep Recovery Sequence Initiated:** Found **${trueOriginalMap.size}** channels. Restoring true original names with a rapid 5-second spacing timer...`
-            });
+            const elements = Array.from(trueOriginalMap.entries());
+            let successfulFixesCount = 0;
 
-            (async () => {
-                const elements = Array.from(trueOriginalMap.entries());
-                for (let i = 0; i < elements.length; i++) {
-                    const [channelId, trueOriginalName] = elements[i];
-                    try {
-                        const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
-                        if (channel) {
-                            // Force mutation directly to eliminate condition mismatch checks
-                            await channel.setName(trueOriginalName);
-                            console.log(`[DEEP REPAIR] Restored node ${channelId} back to: ${trueOriginalName}`);
-                        }
-                    } catch (error) {
-                        console.error(`[REPAIR PACKET EXCEPTION] Target ${channelId}:`, error.message);
+            // Execute completely inline within the deferred promise track to avoid process truncation
+            for (let i = 0; i < elements.length; i++) {
+                const [channelId, trueOriginalName] = elements[i];
+                try {
+                    const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+                    if (channel) {
+                        await channel.setName(trueOriginalName);
+                        successfulFixesCount++;
+                        console.log(`[DEEP REPAIR] Restored node ${channelId} back to: ${trueOriginalName}`);
                     }
-
-                    if (i < elements.length - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                    }
+                } catch (error) {
+                    console.error(`[REPAIR PACKET EXCEPTION] Target ${channelId}:`, error.message);
                 }
-                console.log('[DEEP REPAIR COMPLETE] System recovery pipeline fully finalized.');
-            })();
+
+                // Smooth execution rate throttling delay: 1 second
+                if (i < elements.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+
+            return await interaction.editReply({
+                content: `✅ **System Recovery Finalized:** Successfully scanned audit trail array and forced **${successfulFixesCount}** channels back to their true names!`
+            });
 
         } catch (err) {
             console.error(err);
@@ -311,7 +312,6 @@ client.on('interactionCreate', async interaction => {
                 content: `❌ **Deep Scan Failure:** Internal error loading log arrays: \`${err.message}\``
             });
         }
-        return;
     }
 
     if (interaction.commandName === 'eventchannel') {
