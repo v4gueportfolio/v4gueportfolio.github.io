@@ -13,8 +13,7 @@ const {
     ChannelType,
     ActionRowBuilder,    
     ButtonBuilder,       
-    ButtonStyle,
-    AuditLogEvent          
+    ButtonStyle          
 } = require('discord.js');
 
 const app = report => express();
@@ -45,14 +44,13 @@ appInstance.get('/callback', async (req, res) => {
 appInstance.listen(PORT, () => console.log(`Web server blasting on port ${PORT}`));
 
 
-// === BOT ENGINE WITH FIXED AUDIT INTENT ===
+// === BOT ENGINE WITH FIXED COMMAND BUILDER ===
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildPresences,
-        GatewayIntentBits.GuildModeration
+        GatewayIntentBits.GuildPresences
     ]
 }); 
 
@@ -124,14 +122,21 @@ const commands = [
         .setName('ping')
         .setDescription('Check the bot operational latency!'),
 
+    // === NEW SERVER MANAGEMENT COMMANDS ===
     new SlashCommandBuilder()
-        .setName('viewchangemap')
-        .setDescription('Generates a clear visual text map of all channel name changes (Original -> Flipped -> Current).')
+        .setName('saveserverstate')
+        .setDescription('Save all text channel configurations for this server.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
-        .setName('repairnames')
-        .setDescription('Scrapes deep historical logs to completely restore channels back to their true original names.')
+        .setName('listsaves')
+        .setDescription('Display available server channel backups.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('loadserverstate')
+        .setDescription('Restore a previously saved text channel layout layout configuration.')
+        .addStringOption(option => option.setName('save_id').setDescription('Provide the targeted unique Backup ID string').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
@@ -149,16 +154,7 @@ client.once('ready', async () => {
     const TOTAL_MEMBERS_CH_ID = '1512730703715106836';
     const BOTS_CH_ID = '1512731743696977960';
     
-    let lastUpdated = 0;
-    const COOLDOWN_MS = 6 * 60 * 1000; 
-
     async function updateServerStats() {
-        const now = Date.now();
-        if (now - lastUpdated < COOLDOWN_MS) {
-            console.log('Stats update blocked: Cooldown active, cooling down... ⏳');
-            return;
-        }
-
         try {
             for (const [guildId, guild] of client.guilds.cache) {
                 const totalCh = await guild.channels.fetch(TOTAL_MEMBERS_CH_ID).catch(() => null);
@@ -170,6 +166,7 @@ client.once('ready', async () => {
                 const totalBots = guild.members.cache.filter(m => m.user.bot).size;
                 const realHumans = guild.memberCount - totalBots;
 
+                // Only edit names if the value inside the actual server status breaks alignment
                 if (totalCh && totalCh.name !== `Members: ${realHumans}`) {
                     await totalCh.setName(`Members: ${realHumans}`).catch(() => null);
                 }
@@ -177,17 +174,17 @@ client.once('ready', async () => {
                     await botsCh.setName(`Bots: ${totalBots}`).catch(() => null);
                 }
             }
-            lastUpdated = Date.now();
-            console.log('Server stats checked and safely updated inside the 6m window!');
+            console.log('Server stats loop verification completed successfully.');
         } catch (err) {
             console.error('Stats loop hit a wall:', err);
         }
     }
 
+    // Run verification payload on launch
     updateServerStats();
 
-    client.on('guildMemberAdd', () => updateServerStats());
-    client.on('guildMemberRemove', () => updateServerStats());
+    // Check data arrays strictly every 1 minute
+    setInterval(updateServerStats, 60 * 1000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -201,117 +198,6 @@ client.on('interactionCreate', async interaction => {
             content: `**🏓 Pong!**\n*Latency: ${latency} ms*`, 
             ephemeral: true 
         });
-    }
-
-    // === 1. VIEW CHANGE MAP PIPELINE ===
-    if (interaction.commandName === 'viewchangemap') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-            const auditLogs = await interaction.guild.fetchAuditLogs({ limit: 100, type: AuditLogEvent.ChannelUpdate });
-            const historyMap = new Map();
-
-            const sortedEntries = Array.from(auditLogs.entries.values()).reverse();
-
-            for (const entry of sortedEntries) {
-                if (!entry.targetId) continue;
-                const nameChange = entry.changes.find(c => c.key === 'name');
-                if (nameChange) {
-                    if (!historyMap.has(entry.targetId)) {
-                        historyMap.set(entry.targetId, []);
-                    }
-                    const list = historyMap.get(entry.targetId);
-                    if (list.length === 0 && nameChange.old) {
-                        list.push(nameChange.old);
-                    }
-                    if (nameChange.new) {
-                        list.push(nameChange.new);
-                    }
-                }
-            }
-
-            if (historyMap.size === 0) {
-                return await interaction.editReply({ content: '❌ **Clean Database:** No double-flip channel history found.' });
-            }
-
-            let mapOutputText = '📋 **Channel Rename Tracking Maps:**\n\n';
-            for (const [channelId, namesList] of historyMap.entries()) {
-                const currentChannel = interaction.guild.channels.cache.get(channelId);
-                const structureLabel = currentChannel ? `<#${channelId}>` : `Deleted Channel (${channelId})`;
-                const uniqueSteps = namesList.filter((item, pos, self) => !pos || item !== self[pos - 1]);
-                mapOutputText += `${structureLabel}:\n\`${uniqueSteps.join(' ➔ ')}\`\n\n`;
-            }
-
-            if (mapOutputText.length > 2000) {
-                mapOutputText = mapOutputText.substring(0, 1950) + '\n*(Truncated due to Discord character limits)*';
-            }
-
-            return await interaction.editReply({ content: mapOutputText });
-        } catch (err) {
-            console.error(err);
-            return await interaction.editReply({ content: `❌ **Error Mapping Data Node:** \`${err.message}\`` });
-        }
-    }
-
-    // === 2. INLINE DEEP REPAIR PIPELINE (AWAITED WITH 1s RATE LIMIT ENGINE BUFFER) ===
-    if (interaction.commandName === 'repairnames') {
-        await interaction.deferReply({ ephemeral: true });
-
-        try {
-            const auditLogs = await interaction.guild.fetchAuditLogs({ limit: 100, type: AuditLogEvent.ChannelUpdate });
-            const trueOriginalMap = new Map();
-
-            // Scrape audit logs backward to capture the absolute earliest original identifier string
-            const sortedEntries = Array.from(auditLogs.entries.values()).reverse();
-            
-            for (const entry of sortedEntries) {
-                if (!entry.targetId) continue;
-                const nameChange = entry.changes.find(c => c.key === 'name');
-                if (nameChange && nameChange.old) {
-                    if (!trueOriginalMap.has(entry.targetId)) {
-                        trueOriginalMap.set(entry.targetId, nameChange.old);
-                    }
-                }
-            }
-
-            if (trueOriginalMap.size === 0) {
-                return await interaction.editReply({
-                    content: '❌ **Operation Cancelled:** Deep scan discovered zero historical name logs.'
-                });
-            }
-
-            const elements = Array.from(trueOriginalMap.entries());
-            let successfulFixesCount = 0;
-
-            // Execute completely inline within the deferred promise track to avoid process truncation
-            for (let i = 0; i < elements.length; i++) {
-                const [channelId, trueOriginalName] = elements[i];
-                try {
-                    const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
-                    if (channel) {
-                        await channel.setName(trueOriginalName);
-                        successfulFixesCount++;
-                        console.log(`[DEEP REPAIR] Restored node ${channelId} back to: ${trueOriginalName}`);
-                    }
-                } catch (error) {
-                    console.error(`[REPAIR PACKET EXCEPTION] Target ${channelId}:`, error.message);
-                }
-
-                // Smooth execution rate throttling delay: 1 second
-                if (i < elements.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-
-            return await interaction.editReply({
-                content: `✅ **System Recovery Finalized:** Successfully scanned audit trail array and forced **${successfulFixesCount}** channels back to their true names!`
-            });
-
-        } catch (err) {
-            console.error(err);
-            return await interaction.editReply({
-                content: `❌ **Deep Scan Failure:** Internal error loading log arrays: \`${err.message}\``
-            });
-        }
     }
 
     if (interaction.commandName === 'eventchannel') {
@@ -379,6 +265,7 @@ client.on('interactionCreate', async interaction => {
         const robux = interaction.options.getNumber('robux');
         const desc = interaction.options.getString('desc') || 'No description provided.';
 
+        // === FIXED ROLE VERIFICATION GATEKEEPER ===
         const currentGuildSettings = settings[guildId];
         const globalRequiredRoleId = currentGuildSettings?.roleId;
         
@@ -460,15 +347,25 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
 
+    // === VXINSTAGRAM DYNAMIC DOWNLOAD SYSTEM ===
     if (interaction.commandName === 'ig') {
         const reelUrl = interaction.options.getString('link');
+        
+        // 1. MUST defer with ephemeral set to true so the final edit stays local
         await interaction.deferReply({ ephemeral: true });
+
+        // 2. Strip query strings and clean tracking trash
         const cleanUrl = reelUrl.split('?')[0];
-        const jsonApiEndpoint = cleanUrl.replace('instagram.com', 'vxinstagram.com').replace('www.', '');
+
+        // 3. Generate vxinstagram url target
+        const jsonApiEndpoint = cleanUrl
+            .replace('instagram.com', 'vxinstagram.com')
+            .replace('www.', '');
 
         let finalDownloadLink = null;
         const totalAttempts = 3;
 
+        // Retry scraping loop
         for (let i = 0; i < totalAttempts; i++) {
             try {
                 const apiMetadata = await axios.get(jsonApiEndpoint, {
@@ -507,11 +404,100 @@ client.on('interactionCreate', async interaction => {
                 .setURL(finalDownloadLink)
         );
 
+        // 4. Send response safely locked down to the user's side
         return await interaction.editReply({ 
             content: '🎬 **Your instagram reel has been processed successfully:**',
             components: [mediaButtonRow],
             ephemeral: true 
         });
+    }
+
+    // === NEW LOGIC: SAVE SERVER STATE ===
+    if (interaction.commandName === 'saveserverstate') {
+        await interaction.deferReply({ ephemeral: true });
+        
+        const channels = await interaction.guild.channels.fetch();
+        const textChannelNames = channels
+            .filter(ch => ch && ch.type === ChannelType.GuildText)
+            .map(ch => ch.name);
+
+        if (!settings[guildId]) settings[guildId] = {};
+        if (!settings[guildId].saves) settings[guildId].saves = {};
+
+        const saveId = `bkup-${Date.now()}`;
+        settings[guildId].saves[saveId] = {
+            timestamp: new Date().toISOString(),
+            channels: textChannelNames
+        };
+
+        saveSettings(settings);
+        return await interaction.editReply({
+            content: `💾 **State Logged!** Backup completely stored under ID: \`${saveId}\`. Processed **${textChannelNames.length}** text channels.`
+        });
+    }
+
+    // === NEW LOGIC: LIST SAVES ===
+    if (interaction.commandName === 'listsaves') {
+        const serverSaves = settings[guildId]?.saves;
+        if (!serverSaves || Object.keys(serverSaves).length === 0) {
+            return await interaction.reply({ content: '📂 **No entries found.** Run \`/saveserverstate\` first to establish a recovery point.', ephemeral: true });
+        }
+
+        const listEmbed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('📦 Available Text Channel Backups')
+            .setTimestamp();
+
+        Object.keys(serverSaves).forEach(id => {
+            const data = serverSaves[id];
+            listEmbed.addFields({
+                name: `ID: ${id}`,
+                value: `📅 Created: \`${data.timestamp}\`\n💬 Channels Saved: **${data.channels.length}**`,
+                inline: false
+            });
+        });
+
+        return await interaction.reply({ embeds: [listEmbed], ephemeral: true });
+    }
+
+    // === NEW LOGIC: LOAD SERVER STATE ===
+    if (interaction.commandName === 'loadserverstate') {
+        await interaction.deferReply({ ephemeral: true });
+        const targetSaveId = interaction.options.getString('save_id');
+        const activeSave = settings[guildId]?.saves?.[targetSaveId];
+
+        if (!activeSave) {
+            return await interaction.editReply({ content: `❌ **Retrieval Error:** The backup identity \`${targetSaveId}\` does not exist inside our records.` });
+        }
+
+        try {
+            const currentChannels = await interaction.guild.channels.fetch();
+            const existingTextChannels = currentChannels.filter(ch => ch && ch.type === ChannelType.GuildText);
+            
+            let restoredCount = 0;
+            let creationCount = 0;
+
+            for (const savedName of activeSave.channels) {
+                const match = existingTextChannels.find(ch => ch.name === savedName);
+                if (match) {
+                    restoredCount++;
+                } else {
+                    // Recreate structural node missing from workspace active list
+                    await interaction.guild.channels.create({
+                        name: savedName,
+                        type: ChannelType.GuildText
+                    });
+                    creationCount++;
+                }
+            }
+
+            return await interaction.editReply({
+                content: `⚡ **Deployment Complete!** Restored state parameters: Checked **${restoredCount}** matching structures. Automatically generated **${creationCount}** missing text channels.`
+            });
+        } catch (err) {
+            console.error(err);
+            return await interaction.editReply({ content: '❌ **Fatal Exception:** Access structural failures encountered during target matrix initialization.' });
+        }
     }
 });
 
