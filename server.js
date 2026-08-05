@@ -281,7 +281,7 @@ client.on('interactionCreate', async interaction => {
 
         if (!isOwner && !isAdmin && !hasRequiredRole) {
             return await interaction.reply({ 
-                content: `❌ **Access Denied!** You must be the server Owner, an Administrator, or have the host permission role (<@&1512733256808927282>) to host events! 🥀`, 
+                content: `❌ **Access Denied!** You must be the server Owner, an Administrator, or have the host permission role (<@&1512733256808927282>) to host events!`, 
                 ephemeral: true 
             });
         }
