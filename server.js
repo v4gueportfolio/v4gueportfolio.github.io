@@ -57,6 +57,9 @@ const client = new Client({
 
 const DATA_FILE = path.join(__dirname, 'server_settings.json');
 
+// Global event hosting cooldown tracking
+const eventCooldowns = new Map();
+
 function loadSettings() {
     if (!fs.existsSync(DATA_FILE)) return {};
     try {
@@ -266,15 +269,32 @@ client.on('interactionCreate', async interaction => {
         const robux = interaction.options.getNumber('robux');
         const desc = interaction.options.getString('desc') || 'No description provided.';
 
+        const userId = interaction.user.id;
+        const now = Date.now();
+        const COOLDOWN_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+
         // === FIXED ROLE VERIFICATION GATEKEEPER ===
-        const currentGuildSettings = settings[guildId];
-        const globalRequiredRoleId = currentGuildSettings?.roleId;
-        
-        if (globalRequiredRoleId) {
-            const currentMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-            if (!currentMember || !currentMember.roles.cache.has(globalRequiredRoleId)) {
+        const isOwner = interaction.guild.ownerId === userId;
+        const currentMember = await interaction.guild.members.fetch(userId).catch(() => null);
+        const isAdmin = currentMember && currentMember.permissions.has(PermissionFlagsBits.Administrator);
+        const hasRequiredRole = currentMember && currentMember.roles.cache.has('1512733256808927282');
+
+        if (!isOwner && !isAdmin && !hasRequiredRole) {
+            return await interaction.reply({ 
+                content: `❌ **Access Denied!** You must be the server Owner, an Administrator, or have the host permission role (<@&1512733256808927282>) to host events! 🥀`, 
+                ephemeral: true 
+            });
+        }
+
+        // === COOLDOWN GATEKEEPER ===
+        if (eventCooldowns.has(userId)) {
+            const expirationTime = eventCooldowns.get(userId) + COOLDOWN_DURATION;
+            if (now < expirationTime) {
+                const timeLeft = Math.ceil((expirationTime - now) / 1000);
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
                 return await interaction.reply({ 
-                    content: `❌ **Access Denied!** You do not have the required <@&${globalRequiredRoleId}> role to host events! 🥀`, 
+                    content: `⏳ **Cooldown Active!** Please wait **${minutes}m ${seconds}s** before hosting another event.`, 
                     ephemeral: true 
                 });
             }
@@ -344,6 +364,9 @@ client.on('interactionCreate', async interaction => {
             }
             return await interaction.reply({ content: errorMsg, ephemeral: true });
         }
+
+        // Apply cooldown only on a successful publish sequence
+        eventCooldowns.set(userId, now);
 
         await interaction.reply({ content: `🚀 **Blast Off!** Event successfully beamed to **${postedCount}** verified server channel(s)!`, ephemeral: true });
     }
