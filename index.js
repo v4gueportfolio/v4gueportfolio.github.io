@@ -124,13 +124,13 @@ client.on('interactionCreate', async interaction => {
 // 2. CLAIM KEY / CHECKPOINT ENDPOINT
 // -------------------------------------------------------------
 app.get('/claim-key', (req, res) => {
-    const token = req.query.token || req.query.custom || req.query.subid;
+    const token = req.query.token;
 
     if (!token) {
         return res.status(400).send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 60px;">
-                <h2 style="color: #ff4757;">⚠️ Invalid Link Request</h2>
-                <p>Please open the key link directly through Discord!</p>
+            <div style="font-family: sans-serif; text-align: center; margin-top: 80px;">
+                <h2 style="color: #ff4757;">⚠️ Missing Token</h2>
+                <p>Please open your link directly from Discord.</p>
             </div>
         `);
     }
@@ -140,25 +140,49 @@ app.get('/claim-key', (req, res) => {
 
     if (!session) {
         return res.status(404).send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 60px;">
-                <h2 style="color: #ffa500;">⚠️ Session Expired or Not Found</h2>
-                <p>Please generate a new link using <b>/getkey</b> in Discord.</p>
+            <div style="font-family: sans-serif; text-align: center; margin-top: 80px;">
+                <h2 style="color: #ffa500;">⚠️ Session Not Found</h2>
+                <p>Your session may have already been claimed or expired. Generate a new one with <b>/getkey</b>.</p>
             </div>
         `);
+    }
+
+    // Instead of auto-incrementing and looping immediately, 
+    // render a clean button page so the user confirms completion
+    res.send(`
+        <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
+            <h1 style="color: #5865F2;">Almost Done!</h1>
+            <p style="font-size: 18px; color: #555;">Click the button below to finish your checkpoint and get your key/progress in Discord.</p>
+            <form action="/finish-checkpoint" method="POST">
+                <input type="hidden" name="token" value="${token}">
+                <button type="submit" style="padding: 12px 30px; font-size: 18px; background-color: #2ed573; color: white; border: none; border-radius: 8px; cursor: pointer;">Claim Checkpoint / Key</button>
+            </form>
+        </div>
+    `);
+});
+
+// Add this POST handler right below it
+app.use(express.urlencoded({ extended: true }));
+
+app.post('/finish-checkpoint', (req, res) => {
+    const { token } = req.body;
+    const db = loadData();
+    const session = db.tokens[token];
+
+    if (!session) {
+        return res.send("Session expired. Generate a new key from Discord.");
     }
 
     session.current += 1;
 
     client.users.fetch(session.discordId).then(user => {
         if (session.current < session.required) {
-            // KEEP the token in users.json so step 2 works!
             db.tokens[token] = session;
             saveData(db);
 
             const targetLink = `${WORKINK_BASE}?token=${token}`;
             user.send(`✅ **Checkpoint ${session.current}/${session.required} Completed!**\n\n👉 **Next Checkpoint:**\n${targetLink}`);
         } else {
-            // DELETE token ONLY when all checkpoints are done
             delete db.tokens[token];
 
             const randomHash = crypto.randomBytes(11).toString('hex') + crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
@@ -170,16 +194,15 @@ app.get('/claim-key', (req, res) => {
 
             user.send(`🎉 **All Checkpoints Cleared!** Here is your **${session.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``);
         }
-    }).catch(err => console.error(`DM failure for ${session.discordId}:`, err));
+    }).catch(err => console.error("DM error:", err));
 
     res.send(`
-        <div style="font-family: sans-serif; text-align: center; margin-top: 60px;">
-            <h1 style="color: #2ed573;">✅ Checkpoint Complete!</h1>
-            <p>Check your Discord DMs for status or your key!</p>
+        <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
+            <h1 style="color: #2ed573;">🎉 Success!</h1>
+            <p style="font-size: 18px;">Check your Discord DMs for your update or key!</p>
         </div>
     `);
 });
-
 // -------------------------------------------------------------
 // 3. ROBLOX SCRIPT VALIDATION
 // -------------------------------------------------------------
