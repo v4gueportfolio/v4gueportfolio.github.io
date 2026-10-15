@@ -7,12 +7,7 @@ const {
     SlashCommandBuilder,
     ActionRowBuilder,
     StringSelectMenuBuilder,
-    StringSelectMenuOptionBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle
+    StringSelectMenuOptionBuilder
 } = require('discord.js');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -26,13 +21,10 @@ const app = express();
 app.use(express.json());
 
 const JSON_PATH = path.join(__dirname, 'users.json');
-// Your plain Work.ink link, e.g. https://work.ink/12345/my-key
+// Plain Work.ink link whose DESTINATION is: https://YOUR-APP.onrender.com/claim-key?token={TOKEN}
 const WORKINK_BASE = process.env.WORKINK_LINK || "https://work.ink/35gR/lvh-key-system";
 const RENDER_URL = (process.env.RENDER_EXTERNAL_URL || "https://key-system-7mt3.onrender.com").replace(/\/$/, '');
 
-// ---------------------------------------------------------------
-// Storage helpers
-// ---------------------------------------------------------------
 function loadData() {
     try {
         if (!fs.existsSync(JSON_PATH)) {
@@ -57,18 +49,32 @@ function saveData(data) {
     }
 }
 
-function submitButtonRow() {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('submit_token')
-            .setLabel('Submit Token')
-            .setEmoji('🔑')
-            .setStyle(ButtonStyle.Success)
-    );
+function getCookie(req, name) {
+    const found = (req.headers.cookie || '')
+        .split(';')
+        .map(s => s.trim())
+        .find(s => s.startsWith(name + '='));
+    return found ? decodeURIComponent(found.slice(name.length + 1)) : null;
+}
+
+function findBySid(db, sid) {
+    if (!sid) return null;
+    for (const [discordId, p] of Object.entries(db.progress)) {
+        if (p.sid === sid) return { discordId, progress: p };
+    }
+    return null;
+}
+
+function page(title, body, color = '#2ed573') {
+    return `
+    <div style="font-family: sans-serif; text-align: center; margin-top: 100px; padding: 0 20px;">
+        <h1 style="color: ${color};">${title}</h1>
+        ${body}
+    </div>`;
 }
 
 // ---------------------------------------------------------------
-// 1. DISCORD BOT
+// DISCORD BOT
 // ---------------------------------------------------------------
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -94,7 +100,6 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async interaction => {
     try {
-        // /getkey
         if (interaction.isChatInputCommand() && interaction.commandName === 'getkey') {
             await interaction.deferReply({ ephemeral: true });
 
@@ -115,107 +120,21 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // Duration picked -> show plain Work.ink link + Submit Token button
         if (interaction.isStringSelectMenu() && interaction.customId === 'select_key_duration') {
             const [hours, requiredSteps] = interaction.values[0].split('_').map(Number);
             const discordId = interaction.user.id;
+            const sid = crypto.randomBytes(16).toString('hex');
 
             const db = loadData();
-            db.progress[discordId] = { current: 0, required: requiredSteps, hours };
+            db.progress[discordId] = { sid, current: 0, required: requiredSteps, hours };
             saveData(db);
+
+            const startLink = `${RENDER_URL}/start?sid=${sid}`;
 
             await interaction.update({
-                content:
-                    `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n` +
-                    `👉 **Checkpoint 1/${requiredSteps}:**\n${WORKINK_BASE}\n\n` +
-                    `After finishing, copy the token and press **Submit Token**.`,
-                components: [submitButtonRow()]
+                content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${startLink}\n\n⚠️ Open every link in the **same browser**.`,
+                components: []
             });
-            return;
-        }
-
-        // Submit Token button -> open modal
-        if (interaction.isButton() && interaction.customId === 'submit_token') {
-            const db = loadData();
-            if (!db.progress[interaction.user.id]) {
-                return interaction.reply({ content: '⚠️ No active progress. Run /getkey first.', ephemeral: true });
-            }
-
-            const modal = new ModalBuilder()
-                .setCustomId('token_modal')
-                .setTitle('Submit your Work.ink token')
-                .addComponents(
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('token_input')
-                            .setLabel('Paste your token here')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    )
-                );
-
-            return interaction.showModal(modal);
-        }
-
-        // Modal submitted -> verify token with Work.ink
-        if (interaction.isModalSubmit() && interaction.customId === 'token_modal') {
-            await interaction.deferReply({ ephemeral: true });
-
-            const discordId = interaction.user.id;
-            const token = interaction.fields.getTextInputValue('token_input').trim();
-
-            const db = loadData();
-            const progress = db.progress[discordId];
-
-            if (!progress) {
-                return interaction.editReply('⚠️ No active progress. Run /getkey first.');
-            }
-            if (db.usedTokens[token]) {
-                return interaction.editReply('⚠️ That token was already used. Complete the link again for a new one.');
-            }
-
-            let verify;
-            try {
-                const r = await fetch(`https://work.ink/_api/v2/token/isValid/${encodeURIComponent(token)}?deleteToken=1`);
-                verify = await r.json();
-            } catch (err) {
-                console.error('Work.ink verify error:', err);
-                return interaction.editReply('❌ Could not reach Work.ink. Try again in a moment.');
-            }
-
-            if (!verify.valid) {
-                return interaction.editReply('❌ Invalid token. Finish the Work.ink steps and copy the token again.');
-            }
-
-            db.usedTokens[token] = { discordId, at: Date.now() };
-            progress.current += 1;
-
-            if (progress.current < progress.required) {
-                saveData(db);
-                return interaction.editReply({
-                    content:
-                        `✅ **Checkpoint ${progress.current}/${progress.required} Completed!**\n\n` +
-                        `👉 **Next Checkpoint:**\n${WORKINK_BASE}\n\n` +
-                        `Then press **Submit Token** again.`,
-                    components: [submitButtonRow()]
-                });
-            }
-
-            // All checkpoints done -> generate key
-            delete db.progress[discordId];
-
-            const randomHash =
-                crypto.randomBytes(11).toString('hex') +
-                crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
-            const formattedKey = `LVH_Key=${randomHash}`;
-            const expiresAt = Date.now() + (progress.hours * 60 * 60 * 1000);
-
-            db.activeKeys[formattedKey] = { discordId, expiresAt };
-            saveData(db);
-
-            return interaction.editReply(
-                `🎉 **All Checkpoints Cleared!** Here is your **${progress.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``
-            );
         }
     } catch (err) {
         console.error('Interaction error:', err);
@@ -230,28 +149,102 @@ client.on('interactionCreate', async interaction => {
 });
 
 // ---------------------------------------------------------------
-// 2. TOKEN DISPLAY PAGE
-//    Set your Work.ink link destination to:
-//    https://YOUR-APP.onrender.com/token?token={TOKEN}
-//    (or just use Work.ink's own https://work.ink/token page and skip this route)
+// /start -> remembers the user in a cookie, then goes to Work.ink
 // ---------------------------------------------------------------
-app.get('/token', (req, res) => {
-    const token = String(req.query.token || '').replace(/[<>"'&]/g, '');
-    if (!token) {
-        return res.status(400).send('<h3>⚠️ Missing token. Finish the Work.ink link first.</h3>');
+app.get('/start', (req, res) => {
+    const sid = req.query.sid;
+    const db = loadData();
+
+    if (!findBySid(db, sid)) {
+        return res.status(404).send(page('⚠️ Link expired', '<p>Run /getkey in Discord again.</p>', '#ffa500'));
     }
-    res.send(`
-        <div style="font-family: sans-serif; text-align: center; margin-top: 100px; padding: 0 20px;">
-            <h1 style="color: #2ed573;">✅ Checkpoint Complete!</h1>
-            <p style="font-size: 18px;">Copy this token, go back to Discord and press <b>Submit Token</b>:</p>
-            <p><code id="t" style="font-size: 16px; background: #eee; padding: 10px 14px; border-radius: 6px; word-break: break-all; display: inline-block;">${token}</code></p>
-            <p><button onclick="navigator.clipboard.writeText(document.getElementById('t').innerText)" style="font-size: 16px; padding: 8px 16px;">Copy</button></p>
-        </div>
-    `);
+
+    res.cookie('sid', sid, { maxAge: 60 * 60 * 1000, httpOnly: true, sameSite: 'lax' });
+    res.redirect(WORKINK_BASE);
 });
 
 // ---------------------------------------------------------------
-// 3. ROBLOX SCRIPT VALIDATION
+// /claim-key?token=... -> Work.ink sends the user here when done.
+// Completed -> next step link, or the key after the last step.
+// ---------------------------------------------------------------
+app.get('/claim-key', async (req, res) => {
+    try {
+        const token = req.query.token;
+        if (!token) {
+            return res.status(400).send(page('⚠️ Missing token', '<p>Complete the Work.ink link first.</p>', '#ffa500'));
+        }
+
+        const db = loadData();
+        const found = findBySid(db, getCookie(req, 'sid'));
+
+        if (!found) {
+            return res.status(404).send(page(
+                '⚠️ No active progress found',
+                '<p>Run /getkey in Discord and open the link in the same browser.</p>',
+                '#ffa500'
+            ));
+        }
+
+        if (db.usedTokens[token]) {
+            return res.status(400).send(page('⚠️ Token already used', '<p>Complete the checkpoint again.</p>', '#ff4757'));
+        }
+
+        const verifyRes = await fetch(`https://work.ink/_api/v2/token/isValid/${encodeURIComponent(token)}?deleteToken=1`);
+        const verify = await verifyRes.json();
+
+        if (!verify.valid) {
+            return res.status(400).send(page('❌ Invalid token', '<p>Complete the Work.ink steps properly.</p>', '#ff4757'));
+        }
+
+        db.usedTokens[token] = Date.now();
+
+        const { discordId, progress } = found;
+        progress.current += 1;
+
+        let dmMessage;
+        let pageBody;
+
+        if (progress.current < progress.required) {
+            saveData(db);
+            const nextLink = `${RENDER_URL}/start?sid=${progress.sid}`;
+            dmMessage = `✅ **Checkpoint ${progress.current}/${progress.required} Completed!**\n\n👉 **Next Checkpoint:**\n${nextLink}`;
+            pageBody = `
+                <p style="font-size: 18px;">Checkpoint ${progress.current}/${progress.required} done.</p>
+                <p><a href="${nextLink}" style="font-size: 20px;">👉 Continue to next checkpoint</a></p>`;
+        } else {
+            delete db.progress[discordId];
+
+            const randomHash =
+                crypto.randomBytes(11).toString('hex') +
+                crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+            const formattedKey = `LVH_Key=${randomHash}`;
+            const expiresAt = Date.now() + (progress.hours * 60 * 60 * 1000);
+
+            db.activeKeys[formattedKey] = { discordId, expiresAt };
+            saveData(db);
+
+            dmMessage = `🎉 **All Checkpoints Cleared!** Here is your **${progress.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``;
+            pageBody = `
+                <p style="font-size: 18px;">Here is your ${progress.hours}-hour key:</p>
+                <p><code style="font-size: 18px; background: #eee; padding: 8px 12px; border-radius: 6px;">${formattedKey}</code></p>`;
+        }
+
+        try {
+            const user = await client.users.fetch(discordId);
+            await user.send(dmMessage);
+        } catch (err) {
+            console.error('DM error:', err.message);
+        }
+
+        res.send(page('✅ Checkpoint Complete!', pageBody));
+    } catch (err) {
+        console.error('claim-key error:', err);
+        res.status(500).send(page('❌ Server error', '<p>Try again in a moment.</p>', '#ff4757'));
+    }
+});
+
+// ---------------------------------------------------------------
+// Key validation (for the Roblox side, later)
 // ---------------------------------------------------------------
 app.get('/validate-key', (req, res) => {
     const { key } = req.query;
@@ -274,9 +267,6 @@ app.get('/validate-key', (req, res) => {
 
 app.get('/', (req, res) => res.send('OK'));
 
-// ---------------------------------------------------------------
-// 4. SERVER START & KEEP-ALIVE
-// ---------------------------------------------------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
