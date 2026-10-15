@@ -68,23 +68,28 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
-    if (interaction.isChatInputCommand() && interaction.commandName === 'getkey') {
-        const durationSelect = new StringSelectMenuBuilder()
-            .setCustomId('select_key_duration')
-            .setPlaceholder('Choose your key duration...')
-            .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('12 Hours').setDescription('1 Checkpoint').setValue('12_1'),
-                new StringSelectMenuOptionBuilder().setLabel('24 Hours').setDescription('2 Checkpoints').setValue('24_2'),
-                new StringSelectMenuOptionBuilder().setLabel('48 Hours').setDescription('3 Checkpoints').setValue('48_3'),
-                new StringSelectMenuOptionBuilder().setLabel('72 Hours').setDescription('4 Checkpoints').setValue('72_4')
-            );
+    if (interaction.isStringSelectMenu() && interaction.customId === 'select_key_duration') {
+        // 1. Defer immediately so Discord doesn't throw a timeout error!
+        await interaction.deferUpdate();
 
-        const row = new ActionRowBuilder().addComponents(durationSelect);
+        const [hours, requiredSteps] = interaction.values[0].split('_');
+        const discordId = interaction.user.id;
+        const db = loadData();
 
-        await interaction.reply({
-            content: '🔑 **Select your key duration below:**',
-            components: [row],
-            ephemeral: true 
+        db.progress[discordId] = {
+            current: 0,
+            required: parseInt(requiredSteps),
+            hours: parseInt(hours),
+            lastHit: 0
+        };
+        saveData(db);
+
+        const targetLink = `${WORKINK_BASE}?custom=${discordId}`;
+
+        // 2. Use editReply instead of update after deferring
+        await interaction.editReply({
+            content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}`,
+            components: []
         });
     }
 
