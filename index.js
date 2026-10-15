@@ -50,7 +50,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'getkey') {
         const discordId = interaction.user.id;
         // REPLACE WITH UR ACTUAL WORK.INK LINK BASE
-        const targetLink = `https://work.ink/YOUR_ID/12345?custom=${discordId}`;
+        const targetLink = `https://work.ink/35gR/lvh-key-system?custom=${discordId}`;
         await interaction.reply({ content: `Complete this link to get your key: ${targetLink}`, ephemeral: true });
     }
 });
