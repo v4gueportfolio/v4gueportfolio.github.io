@@ -151,16 +151,16 @@ app.get('/claim-key', (req, res) => {
 
     client.users.fetch(session.discordId).then(user => {
         if (session.current < session.required) {
+            // KEEP the token in users.json so step 2 works!
             db.tokens[token] = session;
             saveData(db);
 
             const targetLink = `${WORKINK_BASE}?token=${token}`;
             user.send(`✅ **Checkpoint ${session.current}/${session.required} Completed!**\n\n👉 **Next Checkpoint:**\n${targetLink}`);
         } else {
-            // Delete session token once finished
+            // DELETE token ONLY when all checkpoints are done
             delete db.tokens[token];
 
-            // Generate final key
             const randomHash = crypto.randomBytes(11).toString('hex') + crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
             const formattedKey = `LVH_Key=${randomHash}`;
             const expiresAt = Date.now() + (session.hours * 60 * 60 * 1000);
