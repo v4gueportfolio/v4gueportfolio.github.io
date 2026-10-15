@@ -17,21 +17,21 @@ const https = require('https');
 const app = express();
 app.use(express.json());
 
-const JSON_PATH = path.join(__dirname, 'users.JSON');
+const JSON_PATH = path.join(__dirname, 'users.json');
 const WORKINK_BASE = process.env.WORKINK_LINK || "https://work.ink/your-link-here";
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL || "https://key-system-7mt3.onrender.com";
 
-// Helper Functions for users.JSON Storage
+// Helper Functions for activeKeys storage only
 function loadData() {
     try {
         if (!fs.existsSync(JSON_PATH)) {
-            fs.writeFileSync(JSON_PATH, JSON.stringify({ tokens: {}, activeKeys: {} }, null, 2));
+            fs.writeFileSync(JSON_PATH, JSON.stringify({ activeKeys: {} }, null, 2));
         }
         const data = fs.readFileSync(JSON_PATH, 'utf8');
         return JSON.parse(data);
     } catch (err) {
-        console.error("Error loading users.JSON:", err);
-        return { tokens: {}, activeKeys: {} };
+        console.error("Error loading users.json:", err);
+        return { activeKeys: {} };
     }
 }
 
@@ -39,7 +39,7 @@ function saveData(data) {
     try {
         fs.writeFileSync(JSON_PATH, JSON.stringify(data, null, 2));
     } catch (err) {
-        console.error("Error saving users.JSON:", err);
+        console.error("Error saving users.json:", err);
     }
 }
 
@@ -51,7 +51,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const commands = [
     new SlashCommandBuilder()
         .setName('getkey')
-        .setDescription('Select key duration and complete checkpoints')
+        .setDescription('Select key duration and get your link')
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -59,7 +59,6 @@ client.once('ready', async () => {
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('Registering slash commands...');
         await rest.put(
             Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
             { body: commands }
@@ -70,17 +69,17 @@ client.once('ready', async () => {
     }
 });
 
-// Dropdown & Interaction Handler
+// Dropdown Menu Handler
 client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'getkey') {
         const durationSelect = new StringSelectMenuBuilder()
             .setCustomId('select_key_duration')
             .setPlaceholder('Choose your key duration...')
             .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('12 Hours').setDescription('1 Checkpoint').setValue('12_1'),
-                new StringSelectMenuOptionBuilder().setLabel('24 Hours').setDescription('2 Checkpoints').setValue('24_2'),
-                new StringSelectMenuOptionBuilder().setLabel('48 Hours').setDescription('3 Checkpoints').setValue('48_3'),
-                new StringSelectMenuOptionBuilder().setLabel('72 Hours').setDescription('4 Checkpoints').setValue('72_4')
+                new StringSelectMenuOptionBuilder().setLabel('12 Hours').setValue('12'),
+                new StringSelectMenuOptionBuilder().setLabel('24 Hours').setValue('24'),
+                new StringSelectMenuOptionBuilder().setLabel('48 Hours').setValue('48'),
+                new StringSelectMenuOptionBuilder().setLabel('72 Hours').setValue('72')
             );
 
         const row = new ActionRowBuilder().addComponents(durationSelect);
@@ -93,27 +92,14 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_key_duration') {
-        const [hours, requiredSteps] = interaction.values[0].split('_');
+        const hours = interaction.values[0];
         const discordId = interaction.user.id;
 
-        // Generate a clean 8-character unique token stored directly in users.JSON
-        const sessionToken = crypto.randomBytes(4).toString('hex');
-        const db = loadData();
-
-        db.tokens[sessionToken] = {
-            discordId: discordId,
-            current: 0,
-            required: parseInt(requiredSteps),
-            hours: parseInt(hours)
-        };
-
-        saveData(db);
-
-        // Pass simple ?token= parameter to Work.ink link
-        const targetLink = `${WORKINK_BASE}?custom=${sessionToken}`;
+        // Directly use Work.ink's custom parameter to pass the Discord ID and hours
+        const targetLink = `${WORKINK_BASE}?custom=${discordId}&hours=${hours}`;
 
         await interaction.update({
-            content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoint${requiredSteps > 1 ? 's' : ''})\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}\n\n*Complete the link above to advance!*`,
+            content: `⏳ **Duration:** ${hours} Hours\n\n👉 **Get your key here:**\n${targetLink}`,
             components: [],
             ephemeral: true
         });
@@ -121,88 +107,44 @@ client.on('interactionCreate', async interaction => {
 });
 
 // -------------------------------------------------------------
-// 2. CLAIM KEY / CHECKPOINT ENDPOINT
+// 2. CLAIM KEY ENDPOINT
 // -------------------------------------------------------------
 app.get('/claim-key', (req, res) => {
-    const token = req.query.token || req.query.custom;
+    // Work.ink passes back the custom discordId
+    const discordId = req.query.custom || req.query.subid;
+    const hours = parseInt(req.query.hours) || 24;
 
-    if (!token) {
+    if (!discordId) {
         return res.status(400).send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 80px;">
-                <h2 style="color: #ff4757;">⚠️ Missing Token</h2>
-                <p>Please open your link directly from Discord.</p>
+            <div style="font-family: sans-serif; text-align: center; margin-top: 60px;">
+                <h2 style="color: #ff4757;">⚠️ Missing User ID</h2>
+                <p>Please open the link directly from Discord!</p>
             </div>
         `);
     }
 
     const db = loadData();
-    const session = db.tokens[token];
 
-    if (!session) {
-        return res.status(404).send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 80px;">
-                <h2 style="color: #ffa500;">⚠️ Session Not Found</h2>
-                <p>Your session may have already been claimed or expired. Generate a new one with <b>/getkey</b>.</p>
-            </div>
-        `);
-    }
+    // Generate final key instantly upon link completion
+    const randomHash = crypto.randomBytes(11).toString('hex') + crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+    const formattedKey = `LVH_Key=${randomHash}`;
+    const expiresAt = Date.now() + (hours * 60 * 60 * 1000);
 
-    // Instead of auto-incrementing and looping immediately, 
-    // render a clean button page so the user confirms completion
+    db.activeKeys[formattedKey] = { discordId, expiresAt };
+    saveData(db);
+
+    client.users.fetch(discordId).then(user => {
+        user.send(`🎉 **Key Generated!** Here is your **${hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``);
+    }).catch(err => console.error(`DM failure for ${discordId}:`, err));
+
     res.send(`
-        <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
-            <h1 style="color: #5865F2;">Almost Done!</h1>
-            <p style="font-size: 18px; color: #555;">Click the button below to finish your checkpoint and get your key/progress in Discord.</p>
-            <form action="/finish-checkpoint" method="POST">
-                <input type="hidden" name="token" value="${token}">
-                <button type="submit" style="padding: 12px 30px; font-size: 18px; background-color: #2ed573; color: white; border: none; border-radius: 8px; cursor: pointer;">Claim Checkpoint / Key</button>
-            </form>
+        <div style="font-family: sans-serif; text-align: center; margin-top: 60px;">
+            <h1 style="color: #2ed573;">🎉 Key Generated Successfully!</h1>
+            <p>Check your Discord DMs for your key!</p>
         </div>
     `);
 });
 
-// Add this POST handler right below it
-app.use(express.urlencoded({ extended: true }));
-
-app.post('/finish-checkpoint', (req, res) => {
-    const { token } = req.body;
-    const db = loadData();
-    const session = db.tokens[token];
-
-    if (!session) {
-        return res.send("Session expired. Generate a new key from Discord.");
-    }
-
-    session.current += 1;
-
-    client.users.fetch(session.discordId).then(user => {
-        if (session.current < session.required) {
-            db.tokens[token] = session;
-            saveData(db);
-
-            const targetLink = `${WORKINK_BASE}?token=${token}`;
-            user.send(`✅ **Checkpoint ${session.current}/${session.required} Completed!**\n\n👉 **Next Checkpoint:**\n${targetLink}`);
-        } else {
-            delete db.tokens[token];
-
-            const randomHash = crypto.randomBytes(11).toString('hex') + crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
-            const formattedKey = `LVH_Key=${randomHash}`;
-            const expiresAt = Date.now() + (session.hours * 60 * 60 * 1000);
-
-            db.activeKeys[formattedKey] = { discordId: session.discordId, expiresAt };
-            saveData(db);
-
-            user.send(`🎉 **All Checkpoints Cleared!** Here is your **${session.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``);
-        }
-    }).catch(err => console.error("DM error:", err));
-
-    res.send(`
-        <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
-            <h1 style="color: #2ed573;">🎉 Success!</h1>
-            <p style="font-size: 18px;">Check your Discord DMs for your update or key!</p>
-        </div>
-    `);
-});
 // -------------------------------------------------------------
 // 3. ROBLOX SCRIPT VALIDATION
 // -------------------------------------------------------------
@@ -226,18 +168,13 @@ app.get('/validate-key', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 4. SERVER START & KEEP-ALIVE PING
+// 4. SERVER START & KEEP-ALIVE
 // -------------------------------------------------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
-// Self-ping every 10 minutes so Render free-tier never goes to sleep!
 setInterval(() => {
-    https.get(RENDER_URL, (res) => {
-        console.log('Keep-alive ping sent to Render.');
-    }).on('error', (err) => {
-        console.error('Keep-alive ping error:', err.message);
-    });
+    https.get(RENDER_URL, (res) => {}).on('error', (err) => {});
 }, 10 * 60 * 1000);
 
 client.login(process.env.DISCORD_TOKEN);
