@@ -110,7 +110,7 @@ client.on('interactionCreate', async interaction => {
         saveData(db);
 
         // Pass simple ?token= parameter to Work.ink link
-        const targetLink = `${WORKINK_BASE}?token=${sessionToken}`;
+        const targetLink = `${WORKINK_BASE}?custom=${sessionToken}`;
 
         await interaction.update({
             content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoint${requiredSteps > 1 ? 's' : ''})\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}\n\n*Complete the link above to advance!*`,
