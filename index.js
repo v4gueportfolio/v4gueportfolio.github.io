@@ -14,7 +14,6 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-// Keep the process alive if something unexpected throws
 process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
 process.on('uncaughtException', err => console.error('Uncaught exception:', err));
 
@@ -22,21 +21,26 @@ const app = express();
 app.use(express.json());
 
 const JSON_PATH = path.join(__dirname, 'users.json');
+// Your plain Work.ink link (e.g. https://work.ink/12345/my-key). NO ?custom= needed.
 const WORKINK_BASE = process.env.WORKINK_LINK || "https://work.ink/your-link-here";
-const RENDER_URL = process.env.RENDER_EXTERNAL_URL || "https://key-system-7mt3.onrender.com";
+const RENDER_URL = (process.env.RENDER_EXTERNAL_URL || "https://key-system-7mt3.onrender.com").replace(/\/$/, '');
 
+// ---------------------------------------------------------------
+// Storage helpers
+// ---------------------------------------------------------------
 function loadData() {
     try {
         if (!fs.existsSync(JSON_PATH)) {
-            fs.writeFileSync(JSON_PATH, JSON.stringify({ progress: {}, activeKeys: {} }, null, 2));
+            fs.writeFileSync(JSON_PATH, JSON.stringify({ progress: {}, activeKeys: {}, usedTokens: {} }, null, 2));
         }
         const data = JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
         if (!data.progress) data.progress = {};
         if (!data.activeKeys) data.activeKeys = {};
+        if (!data.usedTokens) data.usedTokens = {};
         return data;
     } catch (err) {
         console.error("Error loading users.json:", err);
-        return { progress: {}, activeKeys: {} };
+        return { progress: {}, activeKeys: {}, usedTokens: {} };
     }
 }
 
@@ -48,16 +52,40 @@ function saveData(data) {
     }
 }
 
-// -------------------------------------------------------------
-// 1. DISCORD BOT SETUP
-// -------------------------------------------------------------
+function getCookie(req, name) {
+    const found = (req.headers.cookie || '')
+        .split(';')
+        .map(s => s.trim())
+        .find(s => s.startsWith(name + '='));
+    return found ? decodeURIComponent(found.slice(name.length + 1)) : null;
+}
+
+function findBySid(db, sid) {
+    if (!sid) return null;
+    for (const [discordId, p] of Object.entries(db.progress)) {
+        if (p.sid === sid) return { discordId, progress: p };
+    }
+    return null;
+}
+
+function page(title, body, color = '#2ed573') {
+    return `
+    <div style="font-family: sans-serif; text-align: center; margin-top: 100px; padding: 0 20px;">
+        <h1 style="color: ${color};">${title}</h1>
+        ${body}
+    </div>`;
+}
+
+// ---------------------------------------------------------------
+// 1. DISCORD BOT
+// ---------------------------------------------------------------
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const commands = [
     new SlashCommandBuilder()
         .setName('getkey')
         .setDescription('Select key duration and complete checkpoints')
-].map(command => command.toJSON());
+].map(c => c.toJSON());
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
@@ -75,7 +103,6 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async interaction => {
     try {
-        // Handle /getkey slash command
         if (interaction.isChatInputCommand() && interaction.commandName === 'getkey') {
             await interaction.deferReply({ ephemeral: true });
 
@@ -89,34 +116,27 @@ client.on('interactionCreate', async interaction => {
                     new StringSelectMenuOptionBuilder().setLabel('72 Hours').setDescription('4 Checkpoints').setValue('72_4')
                 );
 
-            const row = new ActionRowBuilder().addComponents(durationSelect);
-
             await interaction.editReply({
                 content: '🔑 **Select your key duration below:**',
-                components: [row]
+                components: [new ActionRowBuilder().addComponents(durationSelect)]
             });
             return;
         }
 
-        // Handle key duration select dropdown
         if (interaction.isStringSelectMenu() && interaction.customId === 'select_key_duration') {
             const [hours, requiredSteps] = interaction.values[0].split('_').map(Number);
             const discordId = interaction.user.id;
+            const sid = crypto.randomBytes(16).toString('hex');
 
             const db = loadData();
-            db.progress[discordId] = {
-                current: 0,
-                required: requiredSteps,
-                hours: hours,
-                lastHit: 0
-            };
+            db.progress[discordId] = { sid, current: 0, required: requiredSteps, hours };
             saveData(db);
 
-            const targetLink = `${WORKINK_BASE}?custom=${discordId}`;
+            // The link goes to OUR server first. It remembers who you are, then sends you to Work.ink.
+            const startLink = `${RENDER_URL}/start?sid=${sid}`;
 
-            // Single response: update the original ephemeral message directly
             await interaction.update({
-                content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}`,
+                content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${startLink}\n\n⚠️ Open every link in the **same browser**.`,
                 components: []
             });
         }
@@ -132,92 +152,107 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// -------------------------------------------------------------
-// 2. CLAIM KEY / CHECKPOINT ENDPOINT
-// -------------------------------------------------------------
-app.get('/claim-key', async (req, res) => {
-    const discordId = req.query.custom || req.query.subid;
-
-    if (!discordId) {
-        return res.status(400).send("<h3>⚠️ Missing User ID. Open from Discord!</h3>");
-    }
-
+// ---------------------------------------------------------------
+// 2a. /start  -> remember the user in a cookie, then go to Work.ink
+// ---------------------------------------------------------------
+app.get('/start', (req, res) => {
+    const sid = req.query.sid;
     const db = loadData();
-    const userProgress = db.progress[discordId];
 
-    if (!userProgress) {
-        return res.status(404).send("<h3>⚠️ No active progress found. Run /getkey in Discord first!</h3>");
+    if (!findBySid(db, sid)) {
+        return res.status(404).send(page('⚠️ Link expired', '<p>Run /getkey in Discord again.</p>', '#ffa500'));
     }
 
-    // 5-second cooldown guard to stop Work.ink redirect loops
-    const now = Date.now();
-    if (userProgress.lastHit && (now - userProgress.lastHit < 5000)) {
-        return res.send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
-                <h1 style="color: #ffa500;">⏳ Slow down vro!</h1>
-                <p style="font-size: 18px;">You just completed this step. Check your Discord DMs for the next link.</p>
-            </div>
-        `);
-    }
-
-    userProgress.current += 1;
-    userProgress.lastHit = now;
-
-    let dmMessage;
-
-    if (userProgress.current < userProgress.required) {
-        // More checkpoints to go
-        db.progress[discordId] = userProgress;
-        saveData(db);
-
-        const targetLink = `${WORKINK_BASE}?custom=${discordId}`;
-        dmMessage = `✅ **Checkpoint ${userProgress.current}/${userProgress.required} Completed!**\n\n👉 **Next Checkpoint:**\n${targetLink}`;
-    } else {
-        // All done: generate key
-        delete db.progress[discordId];
-
-        const randomHash =
-            crypto.randomBytes(11).toString('hex') +
-            crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
-        const formattedKey = `LVH_Key=${randomHash}`;
-        const expiresAt = Date.now() + (userProgress.hours * 60 * 60 * 1000);
-
-        db.activeKeys[formattedKey] = { discordId, expiresAt };
-        saveData(db);
-
-        dmMessage = `🎉 **All Checkpoints Cleared!** Here is your **${userProgress.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``;
-    }
-
-    let dmSent = true;
-    try {
-        const user = await client.users.fetch(discordId);
-        await user.send(dmMessage);
-    } catch (err) {
-        dmSent = false;
-        console.error("DM error:", err.message);
-    }
-
-    if (!dmSent) {
-        return res.send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
-                <h1 style="color: #ff4757;">⚠️ Couldn't DM you</h1>
-                <p style="font-size: 18px;">Your progress was saved, but your DMs are closed.<br>
-                Enable DMs from server members, then run /getkey again.</p>
-            </div>
-        `);
-    }
-
-    res.send(`
-        <div style="font-family: sans-serif; text-align: center; margin-top: 100px;">
-            <h1 style="color: #2ed573;">✅ Checkpoint Complete!</h1>
-            <p style="font-size: 18px;">Check your Discord DMs for your next link or key.</p>
-        </div>
-    `);
+    res.cookie('sid', sid, { maxAge: 60 * 60 * 1000, httpOnly: true, sameSite: 'lax' });
+    res.redirect(WORKINK_BASE);
 });
 
-// -------------------------------------------------------------
+// ---------------------------------------------------------------
+// 2b. /claim-key  -> Work.ink sends the user here with ?token=...
+//     Set your Work.ink link destination to:
+//     https://YOUR-APP.onrender.com/claim-key?token={TOKEN}
+// ---------------------------------------------------------------
+app.get('/claim-key', async (req, res) => {
+    try {
+        const token = req.query.token;
+        if (!token) {
+            return res.status(400).send(page('⚠️ Missing token', '<p>Complete the Work.ink link first.</p>', '#ffa500'));
+        }
+
+        const db = loadData();
+        const found = findBySid(db, getCookie(req, 'sid'));
+
+        if (!found) {
+            return res.status(404).send(page(
+                '⚠️ No active progress found',
+                '<p>Run /getkey in Discord and open the link in the same browser.</p>',
+                '#ffa500'
+            ));
+        }
+
+        if (db.usedTokens[token]) {
+            return res.status(400).send(page('⚠️ Token already used', '<p>Each checkpoint needs a fresh completion.</p>', '#ff4757'));
+        }
+
+        // Verify with Work.ink (deleteToken=1 burns the token so it can't be reused)
+        const verifyRes = await fetch(`https://work.ink/_api/v2/token/isValid/${encodeURIComponent(token)}?deleteToken=1`);
+        const verify = await verifyRes.json();
+
+        if (!verify.valid) {
+            return res.status(400).send(page('❌ Invalid token', '<p>Complete the Work.ink steps properly.</p>', '#ff4757'));
+        }
+
+        db.usedTokens[token] = Date.now();
+
+        const { discordId, progress } = found;
+        progress.current += 1;
+
+        let dmMessage;
+        let pageBody;
+
+        if (progress.current < progress.required) {
+            saveData(db);
+            const nextLink = `${RENDER_URL}/start?sid=${progress.sid}`;
+            dmMessage = `✅ **Checkpoint ${progress.current}/${progress.required} Completed!**\n\n👉 **Next Checkpoint:**\n${nextLink}`;
+            pageBody = `
+                <p style="font-size: 18px;">Checkpoint ${progress.current}/${progress.required} done.</p>
+                <p><a href="${nextLink}" style="font-size: 20px;">👉 Continue to next checkpoint</a></p>`;
+        } else {
+            delete db.progress[discordId];
+
+            const randomHash =
+                crypto.randomBytes(11).toString('hex') +
+                crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+            const formattedKey = `LVH_Key=${randomHash}`;
+            const expiresAt = Date.now() + (progress.hours * 60 * 60 * 1000);
+
+            db.activeKeys[formattedKey] = { discordId, expiresAt };
+            saveData(db);
+
+            dmMessage = `🎉 **All Checkpoints Cleared!** Here is your **${progress.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``;
+            pageBody = `
+                <p style="font-size: 18px;">Here is your ${progress.hours}-hour key:</p>
+                <p><code style="font-size: 18px; background: #eee; padding: 8px 12px; border-radius: 6px;">${formattedKey}</code></p>`;
+        }
+
+        // Try to DM too, but the page already shows everything if DMs are closed
+        try {
+            const user = await client.users.fetch(discordId);
+            await user.send(dmMessage);
+        } catch (err) {
+            console.error('DM error:', err.message);
+        }
+
+        res.send(page('✅ Checkpoint Complete!', pageBody));
+    } catch (err) {
+        console.error('claim-key error:', err);
+        res.status(500).send(page('❌ Server error', '<p>Try again in a moment.</p>', '#ff4757'));
+    }
+});
+
+// ---------------------------------------------------------------
 // 3. ROBLOX SCRIPT VALIDATION
-// -------------------------------------------------------------
+// ---------------------------------------------------------------
 app.get('/validate-key', (req, res) => {
     const { key } = req.query;
     const db = loadData();
@@ -237,12 +272,11 @@ app.get('/validate-key', (req, res) => {
     return res.json({ valid: true, message: "Access granted!" });
 });
 
-// Health check (used by keep-alive ping)
 app.get('/', (req, res) => res.send('OK'));
 
-// -------------------------------------------------------------
+// ---------------------------------------------------------------
 // 4. SERVER START & KEEP-ALIVE
-// -------------------------------------------------------------
+// ---------------------------------------------------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
