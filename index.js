@@ -124,7 +124,7 @@ client.on('interactionCreate', async interaction => {
 // 2. CLAIM KEY / CHECKPOINT ENDPOINT
 // -------------------------------------------------------------
 app.get('/claim-key', (req, res) => {
-    const token = req.query.token;
+    const token = req.query.token || req.query.custom;
 
     if (!token) {
         return res.status(400).send(`
