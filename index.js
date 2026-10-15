@@ -92,8 +92,6 @@ client.on('interactionCreate', async interaction => {
 
     // Handle key duration select dropdown
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_key_duration') {
-        await interaction.deferUpdate();
-
         const [hours, requiredSteps] = interaction.values[0].split('_');
         const discordId = interaction.user.id;
         const db = loadData();
@@ -108,9 +106,11 @@ client.on('interactionCreate', async interaction => {
 
         const targetLink = `${WORKINK_BASE}?custom=${discordId}`;
 
+        // Acknowledge dropdown selection and edit the ephemeral reply cleanly
+        await interaction.update({ content: '⏳ Generating your link...', components: [] }).catch(() => {});
+
         await interaction.editReply({
-            content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}`,
-            components: []
+            content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoints)\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}`
         });
     }
 });
