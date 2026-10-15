@@ -1,58 +1,101 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const express = require('express');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const crypto = require('crypto');
 
-// --- 1. EXPRESS WEB SERVER (Work.ink & Roblox Check) ---
 const app = express();
 app.use(express.json());
 
-const db = {}; // Stores keys (use MongoDB for real setup)
+// In-memory key store (Use a DB in production)
+const activeKeys = new Map();
 
-app.post('/workink-webhook', (req, res) => {
-    const { custom, completed } = req.body;
-    if (completed && custom) {
-        const generatedKey = "KEY_" + Math.random().toString(36).substring(2, 10).toUpperCase();
-        db[generatedKey] = { discordId: custom, hwid: null, expires: Date.now() + 86400000 };
-        console.log(`Generated ${generatedKey} for user ${custom}`);
-    }
-    res.sendStatus(200);
-});
-
-app.post('/verify', (req, res) => {
-    const { key, hwid } = req.body;
-    const data = db[key];
-    if (!data || Date.now() > data.expires) return res.json({ success: false, message: "Invalid/expired key!" });
-    if (!data.hwid) data.hwid = hwid;
-    else if (data.hwid !== hwid) return res.json({ success: false, message: "HWID mismatch!" });
-    res.json({ success: true, message: "Access granted!" });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-// --- 2. DISCORD BOT ---
+// -------------------------------------------------------------
+// 1. DISCORD BOT SETUP & AUTOMATIC COMMAND REGISTRATION
+// -------------------------------------------------------------
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+const commands = [
+    new SlashCommandBuilder()
+        .setName('getkey')
+        .setDescription('Generates a Work.ink link to obtain your script key')
+].map(command => command.toJSON());
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+
+    // AUTO-REGISTER COMMANDS INSTANTLY TO YOUR SERVER
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        await rest.put(Routes.applicationCommands(client.user.id), {
-            body: [new SlashCommandBuilder().setName('getkey').toJSON()],
-        });
-        console.log('Slash commands registered!');
+        console.log('Registering slash commands...');
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+            { body: commands }
+        );
+        console.log('Successfully registered /getkey!');
     } catch (error) {
-        console.error(error);
+        console.error('Failed to register commands:', error);
     }
 });
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
+
     if (interaction.commandName === 'getkey') {
         const discordId = interaction.user.id;
-        // REPLACE WITH UR ACTUAL WORK.INK LINK BASE
-        const targetLink = `https://work.ink/35gR/lvh-key-system?custom=${discordId}`;
-        await interaction.reply({ content: `Complete this link to get your key: ${targetLink}`, ephemeral: true });
+        
+        // Replace with your Work.ink link
+        const workinkBase = process.env.WORKINK_LINK || "https://work.ink/your-link-here";
+        const targetLink = `${workinkBase}?custom=${discordId}`;
+
+        await interaction.reply({
+            content: `🔑 **Your Custom Key Link:**\n${targetLink}\n\n*Complete the link to automatically receive your key in this server!*`,
+            ephemeral: true
+        });
     }
+});
+
+// -------------------------------------------------------------
+// 2. WORK.INK WEBHOOK (AUTOMATIC KEY GENERATION)
+// -------------------------------------------------------------
+app.post('/workink-webhook', (req, res) => {
+    const { custom } = req.body;
+
+    if (!custom) {
+        return res.status(400).send('No custom ID provided.');
+    }
+
+    // Generate unique key and lock to Discord ID
+    const newKey = `KEY_${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+    activeKeys.set(newKey, { discordId: custom, createdAt: Date.now() });
+
+    console.log(`Key generated for Discord ID ${custom}:${newKey}`);
+
+    // Optionally DM the user on Discord
+    client.users.fetch(custom).then(user => {
+        user.send(`🎉 **Link completed!** Here is your script key:\n\`${newKey}\``);
+    }).catch(() => console.log(`Could not DM user ${custom}`));
+
+    res.status(200).send('Webhook processed');
+});
+
+// -------------------------------------------------------------
+// 3. ROBLOX SCRIPT VALIDATION ENDPOINT
+// -------------------------------------------------------------
+app.get('/validate-key', (req, res) => {
+    const { key } = req.query;
+
+    if (activeKeys.has(key)) {
+        return res.json({ valid: true, message: "Access granted!" });
+    }
+
+    return res.json({ valid: false, message: "Invalid or expired key." });
+});
+
+// -------------------------------------------------------------
+// 4. SERVER STARTUP
+// -------------------------------------------------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
 
 client.login(process.env.DISCORD_TOKEN);
