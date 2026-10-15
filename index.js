@@ -15,10 +15,9 @@ const app = express();
 app.use(express.json());
 
 // In-Memory Storage
-const activeKeys = new Map();         // Final Valid Keys
-const activeProgress = new Map();     // Checkpoint Progress: discordId -> { current: 0, required: 2, hours: 24 }
+const activeKeys = new Map();         
+const activeProgress = new Map();     
 
-// Single Work.ink Link from Render Env
 const WORKINK_BASE = process.env.WORKINK_LINK || "https://work.ink/your-link-here";
 
 // -------------------------------------------------------------
@@ -50,46 +49,30 @@ client.once('ready', async () => {
 
 // Dropdown & Command Interaction
 client.on('interactionCreate', async interaction => {
-    
-    // Slash Command
     if (interaction.isChatInputCommand() && interaction.commandName === 'getkey') {
         const durationSelect = new StringSelectMenuBuilder()
             .setCustomId('select_key_duration')
             .setPlaceholder('Choose your key duration...')
             .addOptions(
-                new StringSelectMenuOptionBuilder()
-                    .setLabel('12 Hours')
-                    .setDescription('Complete 1 Link Checkpoint')
-                    .setValue('12_1'),
-                new StringSelectMenuOptionBuilder()
-                    .setLabel('24 Hours')
-                    .setDescription('Complete 2 Link Checkpoints')
-                    .setValue('24_2'),
-                new StringSelectMenuOptionBuilder()
-                    .setLabel('48 Hours')
-                    .setDescription('Complete 3 Link Checkpoints')
-                    .setValue('48_3'),
-                new StringSelectMenuOptionBuilder()
-                    .setLabel('72 Hours')
-                    .setDescription('Complete 4 Link Checkpoints')
-                    .setValue('72_4')
+                new StringSelectMenuOptionBuilder().setLabel('12 Hours').setDescription('1 Checkpoint').setValue('12_1'),
+                new StringSelectMenuOptionBuilder().setLabel('24 Hours').setDescription('2 Checkpoints').setValue('24_2'),
+                new StringSelectMenuOptionBuilder().setLabel('48 Hours').setDescription('3 Checkpoints').setValue('48_3'),
+                new StringSelectMenuOptionBuilder().setLabel('72 Hours').setDescription('4 Checkpoints').setValue('72_4')
             );
 
         const row = new ActionRowBuilder().addComponents(durationSelect);
 
         await interaction.reply({
-            content: '🔑 **Select your desired key duration below:**',
+            content: '🔑 **Select your key duration below:**',
             components: [row],
             ephemeral: true 
         });
     }
 
-    // Dropdown Selection
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_key_duration') {
         const [hours, requiredSteps] = interaction.values[0].split('_');
         const discordId = interaction.user.id;
 
-        // Initialize progress for this user
         activeProgress.set(discordId, {
             current: 0,
             required: parseInt(requiredSteps),
@@ -99,7 +82,7 @@ client.on('interactionCreate', async interaction => {
         const targetLink = `${WORKINK_BASE}?custom=${discordId}`;
 
         await interaction.update({
-            content: `⏳ **Selected Duration:** ${hours} Hours (Requires ${requiredSteps} Checkpoint${requiredSteps > 1 ? 's' : ''})\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}\n\n*Complete the link above to advance your progress!*`,
+            content: `⏳ **Duration:** ${hours} Hours (${requiredSteps} Checkpoint${requiredSteps > 1 ? 's' : ''})\n\n👉 **Checkpoint 1/${requiredSteps}:**\n${targetLink}\n\n*Complete the link to advance!*`,
             components: [],
             ephemeral: true
         });
@@ -107,47 +90,37 @@ client.on('interactionCreate', async interaction => {
 });
 
 // -------------------------------------------------------------
-// 2. WORK.INK WEBHOOK (CHECKPOINT SYSTEM)
+// 2. REDIRECT / CLAIM KEY ENDPOINT
 // -------------------------------------------------------------
-app.post('/workink-webhook', (req, res) => {
-    const { custom } = req.body; // Custom passes the Discord User ID
+app.get('/claim-key', (req, res) => {
+    const discordId = req.query.custom || req.query.subid;
 
-    if (!custom) {
-        return res.status(400).send('No custom parameter provided.');
+    if (!discordId) {
+        return res.send('<h2>Error: No user ID attached. Please generate link via Discord.</h2>');
     }
 
-    const discordId = custom;
-    const progress = activeProgress.get(discordId);
-
-    // If user hasn't selected a duration, default to 1 step / 12 hours
-    const currentProg = progress || { current: 0, required: 1, hours: 12 };
-    
-    currentProg.current += 1; // Increment checkpoint step
-
-    console.log(`User ${discordId} progress: ${currentProg.current}/${currentProg.required}`);
+    const progress = activeProgress.get(discordId) || { current: 0, required: 1, hours: 12 };
+    progress.current += 1;
 
     client.users.fetch(discordId).then(user => {
-        // If they still need to complete more steps
-        if (currentProg.current < currentProg.required) {
-            activeProgress.set(discordId, currentProg);
+        if (progress.current < progress.required) {
+            activeProgress.set(discordId, progress);
             const targetLink = `${WORKINK_BASE}?custom=${discordId}`;
-
-            user.send(`✅ **Checkpoint ${currentProg.current}/${currentProg.required} Completed!**\n\n👉 **Next Checkpoint (${currentProg.current + 1}/${currentProg.required}):**\n${targetLink}`);
+            user.send(`✅ **Checkpoint ${progress.current}/${progress.required} Completed!**\n\n👉 **Next Checkpoint:**\n${targetLink}`);
         } else {
-            // Completed all checkpoints! Generate key
             activeProgress.delete(discordId);
 
             const randomHash = crypto.randomBytes(11).toString('hex') + crypto.randomBytes(6).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
             const formattedKey = `LVH_Key=${randomHash}`;
-            const expiresAt = Date.now() + (currentProg.hours * 60 * 60 * 1000);
+            const expiresAt = Date.now() + (progress.hours * 60 * 60 * 1000);
 
             activeKeys.set(formattedKey, { discordId, expiresAt });
 
-            user.send(`🎉 **All Checkpoints Cleared!** Here is your **${currentProg.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``);
+            user.send(`🎉 **All Checkpoints Cleared!** Here is your **${progress.hours}-Hour** key:\n\`\`\`text\n${formattedKey}\n\`\`\``);
         }
-    }).catch(() => console.log(`Could not DM user ${discordId}`));
+    }).catch(err => console.error("DM failed:", err));
 
-    res.status(200).send('OK');
+    res.send('<h1>Success! Check your Discord DMs for your key / next step.</h1>');
 });
 
 // -------------------------------------------------------------
